@@ -1,0 +1,74 @@
+{
+  "name": "everyword",
+  "version": "0.1.0",
+  "description": "Runtime localization with framework-independent adapters and observable coverage.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "exports": {
+    ".": "./src/index.js",
+    "./core": "./src/core.js",
+    "./dom": "./src/dom.js",
+    "./adapters": "./src/adapters.js",
+    "./providers": "./src/providers.js",
+    "./server": "./src/server.js",
+    "./local": "./src/local-provider.js",
+    "./cache": "./src/cache.js",
+    "./disk-cache": "./src/disk-cache.js",
+    "./postgres-cache": "./src/postgres-cache.js",
+    "./storage": "./src/storage.js",
+    "./project": "./src/project.js",
+    "./warm": "./src/warm.js",
+    "./quality": "./src/quality-provider.js",
+    "./local-quality": "./src/local-quality.js",
+    "./model-runtime": "./src/model-runtime.js",
+    "./readiness": "./src/readiness.js"
+  },
+  "bin": {
+    "everyword": "./bin/everyword.js"
+  },
+  "scripts": {
+    "start": "node bin/everyword.js serve",
+    "dev": "node bin/everyword.js serve",
+    "test": "node --test test/*.test.js",
+    "build": "node bin/build.js",
+    "check": "npm test && npm run build",
+    "prepack": "npm run build",
+    "setup": "node bin/setup.js"
+  },
+  "files": [
+    "src",
+    "bin",
+    "demo",
+    "dist",
+    "examples",
+    "LICENSE",
+    "python"
+  ],
+  "devDependencies": {
+    "@fontsource/figtree": "^5.3.0",
+    "esbuild": "^0.25.0",
+    "jsdom": "^26.0.0"
+  },
+  "dependencies": {
+    "pg": "^8.23.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tn3wman/everyword.git"
+  },
+  "homepage": "https://github.com/tn3wman/everyword#readme",
+  "bugs": {
+    "url": "https://github.com/tn3wman/everyword/issues"
+  },
+  "keywords": [
+    "translation",
+    "localization",
+    "i18n",
+    "local-ai",
+    "sqlite",
+    "electron"
+  ]
+}

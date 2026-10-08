@@ -1,0 +1,34 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {JSDOM} from 'jsdom';
+import {captureDOM} from '../src/dom.js';
+import {createTranslationServer} from '../src/server.js';
+import {warmTranslations} from '../src/warm.js';
+import {httpProvider} from '../src/providers.js';
+import {mountPreparedDOM} from '../examples/prepared-web.js';
+
+test('prepared DOM integration exposes only cached languages and never generates during display',async t=>{
+  const dom=new JSDOM('<main><button>Settings</button><section data-everyword-ignore>Private example text</section></main>');
+  const root=dom.window.document.querySelector('main');
+  const contentManifest=await captureDOM(root);
+  let calls=0;
+  const provider={cacheKey:()=> 'example-model',async translate({segments}){calls++;return segments.map(({id})=>({id,text:'Ajustes'}));}};
+  const server=createTranslationServer({provider,contentManifest});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(()=>new Promise(resolve=>{server.close(resolve);server.closeAllConnections();dom.window.close();}));
+  const endpoint=`http://127.0.0.1:${server.address().port}`;
+  await warmTranslations({provider:httpProvider({endpoint:endpoint+'/api/translate'}),sourceLocale:'en',locales:['es'],segments:contentManifest.segments});
+  const warmedCalls=calls;
+  const app=await mountPreparedDOM(root,{endpoint,locale:'fr',locales:['en','es','fr']});
+  t.after(()=>app.disconnect());
+  await app.ready;
+  assert.deepEqual(app.availableLocales,['en','es']);
+  assert.equal(root.querySelector('button').textContent,'Settings');
+  assert.throws(()=>app.setLocale('fr'),/not prepared/);
+  await app.setLocale('es');
+  assert.equal(root.querySelector('button').textContent,'Ajustes');
+  assert.equal(root.querySelector('section').textContent,'Private example text');
+  assert.equal(calls,warmedCalls);
+  await app.setLocale('en');
+  assert.equal(root.querySelector('button').textContent,'Settings');
+});

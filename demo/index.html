@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f2f5fb"><title>Everyword | Translation workspace</title>
+  <link rel="icon" href="/demo/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/demo/styles.css">
+  <script type="module" src="/demo/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#workspace">Skip to workspace</a>
+  <header class="masthead">
+    <a class="brand" href="/" aria-label="Everyword home"><img src="/demo/icon.svg" width="34" height="34" alt=""><span>everyword<span class="version">0.1</span></span></a>
+    <nav aria-label="Workspace"><button class="nav-tab active" id="playground-tab" aria-pressed="true">Playground</button><button class="nav-tab" id="integration-tab" aria-pressed="false">Integration</button></nav>
+    <span class="connection" id="connection"><span class="status-dot"></span>Connecting to service</span>
+  </header>
+  <main id="workspace">
+    <section class="introduction">
+      <div><h1>Same app.<br>New language.</h1><p>Wrap the content your app exposes and translate arbitrary text with a local model.<br class="wide-only"> Placeholder and numeric tokens are checked. Callbacks and typed form values stay unchanged.</p></div>
+      <div class="language-controls">
+        <label for="language">Translate into</label>
+        <div class="select-row"><select id="language"><option value="en">English · Original</option><option value="es">Español · Spanish</option><option value="fr">Français · French</option><option value="ja">日本語 · Japanese</option><option value="ar">العربية · Arabic</option><option value="custom">Another language…</option></select><button id="reset" class="quiet-button" title="Restore original English content">Reset</button></div>
+        <form id="custom-locale" hidden><label for="locale-code">Language code</label><div class="select-row"><input id="locale-code" placeholder="e.g. de-DE" required><button class="primary-button">Apply</button></div></form>
+        <p class="mode-caption" id="mode-caption">Connecting to the local translation service…</p>
+      </div>
+    </section>
+    <div id="playground">
+      <div class="workbench">
+        <section class="preview-section" aria-labelledby="preview-heading">
+          <div class="section-bar"><h2 id="preview-heading">Live application</h2><span class="live-badge"><span class="status-dot"></span><span id="live-status">Original</span></span></div>
+          <div class="platform-bar" role="group" aria-label="Application adapter"><button data-platform="web" aria-pressed="true">Website</button><button data-platform="desktop" aria-pressed="false">Desktop</button><button data-platform="native" aria-pressed="false">Native bridge</button><button data-platform="messages" aria-pressed="false">Messages</button></div>
+          <div class="fixture-shell" id="fixture-shell"><div id="fixture"></div></div>
+          <div class="preview-foot"><span id="adapter-caption">Live DOM adapter. Text, accessible labels, and placeholders.</span><button id="add-content" class="text-button">Add dynamic content <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg></button></div>
+        </section>
+        <aside class="inspector" aria-labelledby="inspection-heading">
+          <div class="section-bar"><h2 id="inspection-heading">Translation check</h2><button id="refresh" class="icon-button" aria-label="Refresh translations"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M5.2 8a7.5 7.5 0 0 1 12.5-3L20 8M4 16l2.3 3A7.5 7.5 0 0 0 18.8 16"/></svg></button></div>
+          <div class="inspection-summary"><div class="coverage-line"><span id="coverage-headline">Source language selected</span><span id="coverage-value">0 / 0</span></div><div class="coverage-track"><span id="coverage-fill"></span></div><p id="coverage-description">Choose a language to see the translation checks.</p></div>
+          <dl class="counts"><div><dt>Captured text</dt><dd id="count-total">0</dd></div><div><dt><span class="legend translated"></span>Translated</dt><dd id="count-translated">0</dd></div><div><dt><span class="legend attention"></span>Safe fallback</dt><dd id="count-attention">0</dd></div></dl>
+          <div class="checks"><p><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg> Placeholders and numbers checked</p><p><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg> Typed form values stay untouched</p><p><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg> Source text available on reset</p></div>
+          <div class="live-input"><label for="sandbox-input">Try your own content</label><textarea id="sandbox-input" rows="4" placeholder="Type consumer-facing sample text"></textarea><p>This explicit sandbox text is translated live. Values typed into the sample app’s forms remain private application data.</p></div>
+          <p class="scope-note" id="scope-note">Counts cover captured content in this view. They do not prove semantic accuracy or coverage of unvisited screens.</p>
+          <p class="scope-note" id="cache-location">Checking the app's translation database…</p>
+        </aside>
+      </div>
+      <section class="content-section" aria-labelledby="content-heading">
+        <div class="content-header"><div><h2 id="content-heading">Captured content</h2><p>Read-only diagnostics show what each adapter sent and what the live model returned.</p></div></div>
+        <div class="inventory-table"><div class="inventory-heading" aria-hidden="true"><span>Original content</span><span>Translation</span><span>Status</span></div><div id="inventory"></div></div>
+        <p class="inventory-footer" id="inventory-footer"></p>
+      </section>
+    </div>
+    <section id="integration" class="integration" hidden>
+      <div class="integration-intro"><h2>Use it in your application</h2><p>One engine, several ways to capture content. The browser bundle is built and served by this workspace.</p></div>
+      <div class="provider-setup"><h3>Your app owns the translation database</h3><p>Choose the database in your app's config. Everyword prepares its own tables, checks the connection, saves generated translations, and invalidates them when the model or content changes. Your app keeps database access and credentials. Browser storage is an optional copy.</p><pre><code>node bin/everyword.js init /path/to/app --storage sqlite
+node bin/everyword.js doctor --project /path/to/app
+node bin/everyword.js serve --project /path/to/app
+
+# Use your existing PostgreSQL database instead:
+node bin/everyword.js init /path/to/app --storage postgres \
+  --database-env EVERYWORD_DATABASE_URL
+# Inject the connection variable using Infisical, then:
+infisical run -- node bin/everyword.js cache migrate --project /path/to/app</code></pre><p>Initialization generates an app integration and reports where native UI or asset text needs an adapter. It preserves your existing files. No manually approved translation database is required.</p></div>
+      <div class="integration-grid"><div><h3>Web & Electron renderers</h3><p>Mount the wrapper on an owned document. It watches later DOM changes and keeps original text for language switching.</p><pre><code id="web-integration-code">import {createEngine, httpProvider, wrapDOM,
+        cachedProvider, browserCache}
+  from 'everyword';
+
+const endpoint = 'http://127.0.0.1:4317';
+const {revision} = await fetch(endpoint + '/api/status')
+  .then(response =&gt; response.json());
+const engine = createEngine({
+  sourceLocale: 'en',
+  provider: cachedProvider(httpProvider({
+    endpoint: endpoint + '/api/translate'
+  }), {storage: browserCache({storage: null}), version: revision})
+});
+
+const app = wrapDOM(document, {engine, locale: 'es'});
+await app.ready;
+await app.setLocale('ja');
+app.disconnect();</code></pre><a href="/dist/everyword.js" download="everyword.js" class="secondary-button">Download browser module</a></div><div><h3>Native UI & structured content</h3><p>For native apps, your host exposes a capture/apply bridge. For email and notification payloads, translate owned text fields.</p><pre><code>const localized = await translateObject(payload, {
+  engine, locale: 'ar'
+});
+
+const app = wrapAdapter({
+  capture: () =&gt; host.captureOriginalText(),
+  apply: (results, state) =&gt;
+    host.applyText(results, state),
+  restore: () =&gt; host.restoreText()
+}, {engine, locale: 'ar'});
+
+await app.refresh();</code></pre><p class="integration-note">The wrapper keeps only the latest locale request and the host retains source strings for reset. SwiftUI, Compose, canvas text, images, and closed shadow roots need their own capture strategy.</p></div></div>
+      <div class="provider-setup"><div><h3>Run local machine translation</h3><p><code>npm run setup</code> downloads the quality model once. Install <code>llama-server</code> from <a href="https://github.com/ggml-org/llama.cpp">llama.cpp</a> first. Initialize your app's database before starting the service. The default Hy-MT2-7B Q8 model runs locally without an account or subscription. Your configured database stores generated translations automatically. You can also point the server at a compatible model endpoint.</p></div><pre><code>npm run setup
+node bin/everyword.js init
+npm start
+
+# Smaller CPU-friendly engine:
+npm run setup -- --fast
+npm start -- --engine fast
+
+# Optional compatible model endpoint:
+npm start -- --model your-local-model \
+  --model-url http://127.0.0.1:11434/v1</code></pre><p>For another web origin, add <code>--allow-origin https://your-app.example</code>. Keep credentials on the server. Public deployments still need authentication and rate limits at the service boundary.</p></div>
+    </section>
+    <div id="notice" class="notice" role="status" aria-live="polite"></div>
+  </main>
+  <footer><span>Everyword is open source under the MIT license.</span><span>Live machine translation with automatic structural safety checks.</span></footer>
+</body>
+</html>
