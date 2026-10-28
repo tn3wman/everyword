@@ -48,6 +48,11 @@ export async function translateCatalog({source, locales, output, provider, sourc
     if (key !== text) throw new TypeError(`Catalog keys must be their source text, so a changed source is a new entry. "${key.slice(0, 80)}" differs from its value.`);
   }
   if (typeof output !== 'function') throw new TypeError('Set output to a function from locale to file path.');
+  if (!contexts || typeof contexts !== 'object' || Array.isArray(contexts) || Object.values(contexts).some(value => typeof value !== 'string')) {
+    throw new TypeError('contexts must map messages to context strings.');
+  }
+  // Own keys only: a message named "constructor" must not pick up Object.prototype.constructor.
+  const contextOf = key => Object.hasOwn(contexts, key) && contexts[key] ? contexts[key] : context;
   sourceLocale = canonicalLocale(sourceLocale);
   const keys = Object.keys(catalog);
   const targets = [...new Set(locales.map(canonicalLocale))].filter(locale => locale !== sourceLocale);
@@ -74,7 +79,7 @@ export async function translateCatalog({source, locales, output, provider, sourc
       running.throwIfAborted();
       const batch = work.slice(offset, offset + BATCH);
       // A message's own context ("Right": "the right-hand page margin") disambiguates a short label.
-      const results = await engine.translate(batch.map((key, index) => ({id: `m${offset + index}`, source: key, ...(contexts[key] ?? context ? {context: contexts[key] ?? context} : {})})), {locale, signal: running});
+      const results = await engine.translate(batch.map((key, index) => ({id: `m${offset + index}`, source: key, ...(contextOf(key) ? {context: contextOf(key)} : {})})), {locale, signal: running});
       results.forEach((result, index) => {
         // Text without letters (" × ", "1.") is its own translation.
         if (['translated', 'source'].includes(result.status)) translated.set(batch[index], result.text);

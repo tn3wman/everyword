@@ -3,7 +3,7 @@ import {balancedMarkers, canonicalLocale, hasTerm, protectedSpans, protectedToke
 const DEFAULT_MODEL = 'Hy-MT2-7B-Q8_0';
 const MODEL_REVISION = 'ab8472660ac61fac25f1af43fac2599d52a8a775';
 const MODEL_SHA256 = '58b3ad55dd6f6fa08c695cddc34fb5f8f708a844f78ae10508071914b0ed67c0';
-const PROMPT_REVISION = 'quality-plain-v6';
+const PROMPT_REVISION = 'quality-plain-v7';
 const MAX_CHUNK_CHARS = 1500;
 const DEFAULT_CONCURRENCY = 4;
 const RETRY_TEMPERATURES = [0, 0.5];
@@ -202,14 +202,18 @@ function contextEcho(chunk, text) {
 // Hy-MT2 sometimes greets the reader or echoes its prompt ("Text" → "Hey du, hier ist die
 // Übersetzung …"). Real translations, abbreviation expansions included (FAQ → अक्सर पूछे जाने वाले
 // प्रश्न), stay within this bound in measured catalogs.
-// A one- or two-word label given a context hint that comes back as a sentence, or with punctuation
-// it lacks, has usually absorbed the hint ("Gain" → "海拔上升高度，即总爬升量").
-const SENTENCE_PUNCTUATION = /[,，、;；:：。.!?！？]/u;
+// A one- or two-word label given a context hint that comes back as a clause or a phrase has usually
+// absorbed the hint: "Gain" → "海拔上升高度，即总爬升量", "Streams" → "arroyos y riachuelos dibujados en
+// un mapa", "portrait" → "Porträtorichtung, höher als breit". Abbreviations ("z. B.") and list marks
+// ("横向、纵向") stay valid. Heuristic: an unpunctuated explanation of up to four words, or up to eight
+// CJK characters, still passes.
+const CLAUSE_PUNCTUATION = /[,，;；:：]/gu;
+const UNSPACED_SCRIPT = /[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Thai}\p{sc=Lao}\p{sc=Khmer}\p{sc=Myanmar}]/gu;
 function expandsLabel(chunk, text) {
   const source = chunk.source;
   if (!humanContext(chunk.context) || source.trim().split(/\s+/u).length > 2 || !/\p{L}/u.test(source)) return false;
-  if ([...text.matchAll(new RegExp(SENTENCE_PUNCTUATION, 'gu'))].length > [...source.matchAll(new RegExp(SENTENCE_PUNCTUATION, 'gu'))].length) return true;
-  return text.trim().split(/\s+/u).length > 4;
+  if ((text.match(CLAUSE_PUNCTUATION) ?? []).length > (source.match(CLAUSE_PUNCTUATION) ?? []).length) return true;
+  return text.trim().split(/\s+/u).length > 4 || (text.match(UNSPACED_SCRIPT) ?? []).length > 8;
 }
 
 function addsText(source, text) {

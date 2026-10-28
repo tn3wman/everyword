@@ -388,3 +388,22 @@ test('a malformed model response is an error, not a rejected translation', async
     assert.equal(result.text, 'Create a map of your favorite place.');
   }
 });
+
+test('a short label that absorbs its context is retried, then rejected; real short labels pass', async () => {
+  const translate = async (source, context, replies, targetLocale = 'de') => {
+    let call = 0;
+    const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async () => response(replies[Math.min(call++, replies.length - 1)])});
+    const [result] = await provider.translate({...request([{id: 'label', source, context}]), targetLocale});
+    return {result, calls: call};
+  };
+  const hint = 'elevation gain, the total climb of a route';
+  assert.equal((await translate('Gain', hint, ['海拔上升高度，即总爬升量', '爬升'], 'zh-CN')).result.text, '爬升');
+  const exhausted = await translate('Streams', 'small rivers on a map', ['arroyos y riachuelos dibujados en un mapa'], 'es');
+  assert.equal(exhausted.result.status, 'rejected');
+  assert.equal(exhausted.calls, 3);
+  assert.equal((await translate('portrait', 'page orientation', ['Porträtorichtung, höher als breit'])).result.status, 'rejected');
+  assert.equal((await translate('Gain', hint, ['海拔上升高度即总爬升量是多少'], 'zh-CN')).result.status, 'rejected');
+  // Accepted; the final-period cleanup separately trims its last dot.
+  assert.equal((await translate('For example', 'a phrase', ['z. B.'])).result.status, undefined);
+  assert.deepEqual((await translate('Orientation', 'page orientation', ['横向、纵向'], 'zh-CN')).result, {id: 'label', text: '横向、纵向', reviewed: false});
+});

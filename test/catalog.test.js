@@ -92,3 +92,15 @@ test('checks every locale before inference, and a failing locale stops the other
   assert.equal(spanishSettled, true);
   await assert.rejects(readFile(files.output('es')), {code: 'ENOENT'});
 });
+
+test('a message context wins over the global one, and inherited keys are not contexts', async () => {
+  const files = await project(entries('Right', 'constructor', 'Save'));
+  const seen = {};
+  const provider = {async translate({segments}) {
+    for (const segment of segments) seen[segment.source] = segment.context;
+    return segments.map(segment => ({id: segment.id, text: `es ${segment.source}`}));
+  }};
+  await translateCatalog({source: files.source, locales: ['es'], output: files.output, provider, context: 'an app', contexts: {Right: 'the right-hand page margin', Save: ''}});
+  assert.deepEqual(seen, {Right: 'the right-hand page margin', constructor: 'an app', Save: 'an app'});
+  await assert.rejects(translateCatalog({source: files.source, locales: ['es'], output: files.output, provider, contexts: {Right: 3}}), /contexts must map/);
+});
