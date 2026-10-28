@@ -15,8 +15,8 @@ export function localeDirection(locale) {
 // Numbered rich-text markers such as <0>, </0> and <1/> (Lingui, react-intl, i18next Trans).
 // A URL runs to the next space or angle bracket, punctuation included, so a translation can change
 // nothing attached to it ("／@evil.example"). Tabs and newlines do not end it: URL parsers drop them.
-// The scheme is case-insensitive.
-const PROTECTED_PATTERN = /\{\{[^{}]+\}\}|\$\{[^{}]+\}|\{[\w.]+\}|%(?:\d+\$)?[-+#0]*\d*(?:\.\d+)?[sdifuxXoeEgGc]|%(?:\d+\$)?[-+#0]* [-+#0 ]*\d*(?:\.\d+)?[sdifuxXoeEgGc](?![\p{L}\p{N}])|%\([\w]+\)[sdif]|[Hh][Tt][Tt][Pp][Ss]?:\/\/(?:[^\s<>]|[\t\n\r])+|[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}|<\/?\d+\s*\/?>/gu;
+// The scheme is case-insensitive, and "//" is optional, as URL parsers accept "https:evil.example".
+const PROTECTED_PATTERN = /\{\{[^{}]+\}\}|\$\{[^{}]+\}|\{[\w.]+\}|%(?:\d+\$)?[-+#0]*\d*(?:\.\d+)?[sdifuxXoeEgGc]|%(?:\d+\$)?[-+#0]* [-+#0 ]*\d*(?:\.\d+)?[sdifuxXoeEgGc](?![\p{L}\p{N}])|%\([\w]+\)[sdif]|[Hh][Tt][Tt][Pp][Ss]?:(?:[^\s<>]|[\t\n\r])+|[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}|<\/?\d+\s*\/?>/gu;
 
 /** Protected spans in order: {index, token}. */
 export function protectedSpans(text) {

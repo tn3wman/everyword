@@ -225,6 +225,7 @@ test('a URL change hidden behind full-width punctuation, a tab or an uppercase s
   assert.equal(validateTranslation('Open HTTPS://example.com now', 'Öffne HTTPS://example.com jetzt'), null);
   assert.equal(replaceTerm('https://example.com/a。Ridgeline', 'Ridgeline', 'Kammlinie'), 'https://example.com/a。Ridgeline');
   assert.ok(validateTranslation('Open https://trusted.example now', 'Öffne https://trusted.example\t@evil.example jetzt'));
+  assert.ok(validateTranslation('Open https://trusted.example now', 'Öffne https:evil.example/?https://trusted.example jetzt'));
   assert.ok(validateTranslation('Open https://example.com/時々 now', 'Öffne https://example.com/時 jetzt'));
   assert.ok(validateTranslation('Open https://example.com/path now', 'Öffne https://example.com/path／ jetzt'));
 });
