@@ -360,7 +360,7 @@ export function qualityProvider({baseURL, model = DEFAULT_MODEL, fetch: fetchImp
         // Each attempt gets its own timeout, so slow failed attempts do not starve the retries, and
         // timeoutMs covers each 1,024 tokens it may generate: a long Hindi passage can need 3,000
         // tokens while every slot of the server is busy.
-        const attemptTimeout = timeoutMs * Math.max(1, maxTokens / 1024);
+        const attemptTimeout = Math.ceil(timeoutMs * Math.max(1, maxTokens / 1024));
         const attempt = async (prompt, temperature) => {
           const requestSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(attemptTimeout)]) : AbortSignal.timeout(attemptTimeout);
           let response;
