@@ -388,3 +388,44 @@ test('a malformed model response is an error, not a rejected translation', async
     assert.equal(result.text, 'Create a map of your favorite place.');
   }
 });
+
+test('a short label that absorbs its context is retried, then rejected; real short labels pass', async () => {
+  const translate = async (source, context, replies, targetLocale = 'de') => {
+    let call = 0;
+    const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async () => response(replies[Math.min(call++, replies.length - 1)])});
+    const [result] = await provider.translate({...request([{id: 'label', source, context}]), targetLocale});
+    return {result, calls: call};
+  };
+  const hint = 'elevation gain, the total climb of a route';
+  assert.equal((await translate('Gain', hint, ['海拔上升高度，即总爬升量', '爬升'], 'zh-CN')).result.text, '爬升');
+  const exhausted = await translate('Streams', 'small rivers on a map', ['arroyos y riachuelos dibujados en un mapa'], 'es');
+  assert.equal(exhausted.result.status, 'rejected');
+  assert.equal(exhausted.calls, 3);
+  assert.equal((await translate('portrait', 'page orientation', ['Porträtorichtung, höher als breit'])).result.status, 'rejected');
+  assert.equal((await translate('Gain', hint, ['海拔上升高度即总爬升量是多少'], 'zh-CN')).result.status, 'rejected');
+  // Accepted; the final-period cleanup separately trims its last dot.
+  assert.equal((await translate('For example', 'a phrase', ['z. B.'])).result.status, undefined);
+  assert.deepEqual((await translate('Orientation', 'page orientation', ['横向、纵向'], 'zh-CN')).result, {id: 'label', text: '横向、纵向', reviewed: false});
+  assert.deepEqual((await translate('Settings', 'application preferences', ['การตั้งค่า'], 'th')).result, {id: 'label', text: 'การตั้งค่า', reviewed: false});
+  const required = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async () => response('纬度，经度')});
+  const [coordinates] = await required.translate({...request([{id: 'c', source: 'Coordinates', context: 'map coordinate display'}]), targetLocale: 'zh-CN', glossary: {Coordinates: '纬度，经度'}});
+  assert.deepEqual(coordinates, {id: 'c', text: '纬度，经度', reviewed: false});
+  const cased = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async () => response('latitud, longitud')});
+  const [lower] = await cased.translate({...request([{id: 'c', source: 'Coordinates', context: 'map coordinate display'}]), glossary: {Coordinates: 'Latitud, longitud'}});
+  assert.deepEqual(lower, {id: 'c', text: 'latitud, longitud', reviewed: false});
+});
+
+test('a translation using a word the style avoids is retried with that word named, then rejected', async () => {
+  const prompts = [];
+  const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async (_url, options) => {
+    prompts.push(JSON.parse(options.body).messages[0].content);
+    return response(prompts.length === 1 ? 'Speichern Sie Ihre Dateien' : 'Speichere deine Dateien');
+  }});
+  const [result] = await provider.translate({...request([{id: 'save', source: 'Save your files'}]), targetLocale: 'de', avoid: ['Sie', 'Ihre']});
+  assert.deepEqual(result, {id: 'save', text: 'Speichere deine Dateien', reviewed: false});
+  assert.match(prompts[1], /Do not use these words: "Sie", "Ihre"\./);
+  const stubborn = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async () => response('Speichern Sie Ihre Dateien')});
+  const [rejected] = await stubborn.translate({...request([{id: 'save', source: 'Save your files'}]), targetLocale: 'de', avoid: ['Sie']});
+  assert.equal(rejected.status, 'rejected');
+  assert.match(rejected.reason, /"Sie", which the style avoids/);
+});

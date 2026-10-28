@@ -3,7 +3,7 @@ import {balancedMarkers, canonicalLocale, hasTerm, protectedSpans, protectedToke
 const DEFAULT_MODEL = 'Hy-MT2-7B-Q8_0';
 const MODEL_REVISION = 'ab8472660ac61fac25f1af43fac2599d52a8a775';
 const MODEL_SHA256 = '58b3ad55dd6f6fa08c695cddc34fb5f8f708a844f78ae10508071914b0ed67c0';
-const PROMPT_REVISION = 'quality-plain-v6';
+const PROMPT_REVISION = 'quality-plain-v7';
 const MAX_CHUNK_CHARS = 1500;
 const DEFAULT_CONCURRENCY = 4;
 const RETRY_TEMPERATURES = [0, 0.5];
@@ -202,6 +202,24 @@ function contextEcho(chunk, text) {
 // Hy-MT2 sometimes greets the reader or echoes its prompt ("Text" → "Hey du, hier ist die
 // Übersetzung …"). Real translations, abbreviation expansions included (FAQ → अक्सर पूछे जाने वाले
 // प्रश्न), stay within this bound in measured catalogs.
+// A one- or two-word label given a context hint that comes back as a clause or a phrase has usually
+// absorbed the hint: "Gain" → "海拔上升高度，即总爬升量", "Streams" → "arroyos y riachuelos dibujados en
+// un mapa", "portrait" → "Porträtorichtung, höher als breit". Abbreviations ("z. B.") and list marks
+// ("横向、纵向") stay valid. Heuristic: an unpunctuated explanation of up to four words, or up to eight
+// Han or kana characters, still passes.
+const CLAUSE_PUNCTUATION = /[,，;；:：]/gu;
+// Han and kana only: a Thai, Lao, Khmer or Myanmar label counts combining marks as characters.
+const HAN_OR_KANA = /[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}]/gu;
+function expandsLabel(chunk, text, glossary) {
+  const source = chunk.source;
+  if (!humanContext(chunk.context) || source.trim().split(/\s+/u).length > 2 || !/\p{L}/u.test(source)) return false;
+  // A required glossary translation may bring its own punctuation.
+  // Case-insensitive, as the glossary check allows a required term to change case.
+  for (const replacement of Object.values(glossary)) text = text.replace(new RegExp(replacement.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'giu'), ' ');
+  if ((text.match(CLAUSE_PUNCTUATION) ?? []).length > (source.match(CLAUSE_PUNCTUATION) ?? []).length) return true;
+  return text.trim().split(/\s+/u).length > 4 || (text.match(HAN_OR_KANA) ?? []).length > 8;
+}
+
 function addsText(source, text) {
   return text.length > source.length * 3 + 24;
 }
@@ -225,6 +243,10 @@ function parseTranslation(payload, chunk, glossary = {}, sourceLocale) {
 
 // Every rule a translation of chunk.source must meet; returns the text or throws.
 function checkTranslation(chunk, text, glossary, sourceLocale) {
+  for (const word of chunk.avoid ?? []) {
+    if (hasTerm(text, word) && !hasTerm(chunk.source, word)) throw preservationError(`The local quality model used "${word}", which the style avoids.`);
+  }
+  if (expandsLabel(chunk, text, glossary)) throw preservationError('The local quality model turned a short label into a sentence.');
   if (addsText(chunk.source, text)) throw preservationError('The local quality model added text that is not in the source.');
   const contextMarker = /\b(?:[a-z][\w-]*(?:#[\w-]+)?:text|heading=)/u;
   if (contextMarker.test(text) && !contextMarker.test(chunk.source)) throw new TypeError('The local quality model echoed internal context.');
@@ -320,6 +342,7 @@ function buildPreservationRetryPrompt(options) {
   ];
   if (tokens.length) requirements.push(`These protected tokens must remain unchanged: ${tokens.map(value => JSON.stringify(value)).join(', ')}`);
   if (Object.keys(options.glossary).length) requirements.push('Use each required translation below exactly as written.');
+  if (chunk.avoid?.length) requirements.push(`Do not use these words: ${chunk.avoid.map(word => JSON.stringify(word)).join(', ')}.`);
   return `${requirements.join('\n')}\n\n${buildPrompt(options)}`;
 }
 
@@ -339,7 +362,7 @@ export function qualityProvider({baseURL, model = DEFAULT_MODEL, fetch: fetchImp
       model === DEFAULT_MODEL ? MODEL_REVISION : 'custom',
       model === DEFAULT_MODEL ? MODEL_SHA256 : 'custom',
     ]),
-    async translate({sourceLocale, targetLocale, segments, glossary = {}, style = '', signal} = {}) {
+    async translate({sourceLocale, targetLocale, segments, glossary = {}, style = '', avoid = [], signal} = {}) {
       signal?.throwIfAborted();
       if (!Array.isArray(segments)) throw new TypeError('Quality translation segments must be an array.');
       if (segments.length > 10000) throw new TypeError('Quality translation accepts at most 10,000 segments.');
@@ -350,6 +373,7 @@ export function qualityProvider({baseURL, model = DEFAULT_MODEL, fetch: fetchImp
       signal?.throwIfAborted();
       const endpoint = validateEndpoint(resolvedBaseURL);
       const {chunks, layouts} = prepareChunks(segments);
+      for (const chunk of chunks) chunk.avoid = avoid;
       glossary = validateGlossary(glossary);
       const translated = new Map();
       const failed = new Map();

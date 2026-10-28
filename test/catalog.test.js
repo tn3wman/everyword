@@ -92,3 +92,38 @@ test('checks every locale before inference, and a failing locale stops the other
   assert.equal(spanishSettled, true);
   await assert.rejects(readFile(files.output('es')), {code: 'ENOENT'});
 });
+
+test('a message context wins over the global one, and inherited keys are not contexts', async () => {
+  const files = await project(entries('Right', 'constructor', 'Save'));
+  const seen = {};
+  const provider = {async translate({segments}) {
+    for (const segment of segments) seen[segment.source] = segment.context;
+    return segments.map(segment => ({id: segment.id, text: `es ${segment.source}`}));
+  }};
+  await translateCatalog({source: files.source, locales: ['es'], output: files.output, provider, context: 'an app', contexts: {Right: 'the right-hand page margin', Save: ''}});
+  assert.deepEqual(seen, {Right: 'the right-hand page margin', constructor: 'an app', Save: 'an app'});
+  await assert.rejects(translateCatalog({source: files.source, locales: ['es'], output: files.output, provider, contexts: {Right: 3}}), /contexts must map/);
+});
+
+test('a kept translation that uses a word the style avoids is translated again', async () => {
+  const files = await project(entries('Save your files', 'Open'), {de: {'Save your files': 'Speichern Sie Ihre Dateien', Open: 'Öffnen'}});
+  const requests = [];
+  const provider = {async translate(request) {
+    requests.push(request);
+    return request.segments.map(segment => ({id: segment.id, text: 'Speichere deine Dateien'}));
+  }};
+  await translateCatalog({source: files.source, locales: ['de'], output: files.output, provider, styles: {de: {note: 'Address the reader with du.', avoid: ['Sie', 'Ihre']}}});
+  assert.deepEqual(requests.map(request => [request.style, request.avoid, request.segments.map(segment => segment.source)]), [['Address the reader with du.', ['Sie', 'Ihre'], ['Save your files']]]);
+  assert.deepEqual(await files.read('de'), {'Save your files': 'Speichere deine Dateien', Open: 'Öffnen'});
+});
+
+test('a provider that ignores the avoid list cannot save an avoided word', async () => {
+  const files = await project(entries('Save your files'));
+  const provider = {async translate(request) {
+    return request.segments.map(segment => ({id: segment.id, text: 'Speichern Sie Ihre Dateien'}));
+  }};
+  const report = await translateCatalog({source: files.source, locales: ['de'], output: files.output, provider, styles: {de: {note: 'du', avoid: ['Sie']}}});
+  assert.equal(report.ready, false);
+  assert.match(report.locales[0].failures[0].reason, /"Sie", which the style avoids/);
+  assert.deepEqual(await files.read('de'), {});
+});

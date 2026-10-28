@@ -45,7 +45,7 @@ try {
   const display=value=>console.log(JSON.stringify(value,null,2));
   if (opts.help || command==='help') {
     console.log(`Everyword\n\n  everyword init [project] [--storage sqlite|postgres|memory]\n                 [--database-env EVERYWORD_DATABASE_URL] [--adapter web|electron|native|messages]\n  everyword cache migrate [--project directory]\n  everyword cache status [--project directory]\n  everyword doctor [--project directory] [--json]\n  npm run setup                         Download the local quality model (requires llama-server)\n  everyword serve [--project directory] [--port 4317] [--host 127.0.0.1]
-                  [--engine quality|fast] [--local-url http://127.0.0.1:PORT/v1]\n                  [--model name] [--model-url http://127.0.0.1:11434/v1]\n                  [--allow-origin https://your-app.example]\n  everyword inspect <project-directory> [--json]\n  everyword warm --input capture.json --locales es,fr,ja,ar\n  everyword translate --input content.json --locale es\n  everyword catalog --source locales/en.json --locales es,fr,ja --output 'locales/{locale}.json'\n                    [--glossary glossary.json] [--style style.json] [--context 'What the app is']\n\nDefault: Hy-MT2-7B Q8, running locally with llama-server. No account or approval required.\nThe model downloads once. Generated translations are cached automatically.\nFor the smaller offline engine: npm run setup -- --fast, then serve --engine fast.\nFor a credentialed compatible model provider, inject EVERYWORD_API_KEY with Infisical.`);
+                  [--engine quality|fast] [--local-url http://127.0.0.1:PORT/v1]\n                  [--model name] [--model-url http://127.0.0.1:11434/v1]\n                  [--allow-origin https://your-app.example]\n  everyword inspect <project-directory> [--json]\n  everyword warm --input capture.json --locales es,fr,ja,ar\n  everyword translate --input content.json --locale es\n  everyword catalog --source locales/en.json --locales es,fr,ja --output 'locales/{locale}.json'\n                    [--glossary glossary.json] [--style style.json] [--context 'What the app is']\n                    [--contexts contexts.json]\n\nDefault: Hy-MT2-7B Q8, running locally with llama-server. No account or approval required.\nThe model downloads once. Generated translations are cached automatically.\nFor the smaller offline engine: npm run setup -- --fast, then serve --engine fast.\nFor a credentialed compatible model provider, inject EVERYWORD_API_KEY with Infisical.`);
   } else if(command==='init'){
     const directory=opts._[0]??project;
     const result=await initializeProject(directory,{storage:opts.storage??'sqlite',databaseEnv:opts['database-env']??'EVERYWORD_DATABASE_URL',cachePath:opts['cache-path']??'.everyword/translations.sqlite',endpoint:opts.endpoint??'http://127.0.0.1:4317',locale:opts.locale??'es',sourceLocale:opts['source-locale']??'en',adapter:opts.adapter??'auto'});
@@ -122,12 +122,13 @@ try {
     if(!opts.output.includes('{locale}'))throw new Error('--output must contain {locale}, for example locales/{locale}.json.');
     const glossaries=opts.glossary?JSON.parse(await readFile(opts.glossary,'utf8')):{};
     const styles=opts.style?JSON.parse(await readFile(opts.style,'utf8')):{};
+    const contexts=opts.contexts?JSON.parse(await readFile(opts.contexts,'utf8')):{};
     const provider=await providerFrom(opts);
     cleanup.push(()=>provider.close?.());
     let report;
     try{
       report=await translateCatalog({source:opts.source,locales:opts.locales.split(',').map(value=>value.trim()),output:locale=>opts.output.replaceAll('{locale}',locale),
-        provider,sourceLocale:opts['source-locale']??'en',glossaries,styles,context:opts.context,
+        provider,sourceLocale:opts['source-locale']??'en',glossaries,styles,context:opts.context,contexts,
         // Progress goes to stderr, so --json output on stdout stays parseable during long runs.
         onProgress:({locale,completed,total,failed})=>console.error(`${locale}: ${completed}/${total} new strings (${failed} failed)`)});
     }finally{cleanup.pop();await provider.close?.();}

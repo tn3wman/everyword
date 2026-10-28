@@ -30,9 +30,21 @@ export function glossaryFor(glossaries, locale) {
   return {...glossaries['*'], ...glossaries[language], ...glossaries[locale]};
 }
 
-/** Style file: {"<locale>": "Address the reader with du."}; the most specific entry wins. */
-export function styleFor(styles, locale) {
+/**
+ * Style file: {"<locale>": "Address the reader with du."} or {"<locale>": {"note": "…", "avoid":
+ * ["Sie", "Ihr"]}}; the most specific entry wins. A translation that uses an avoided word the source
+ * does not is retried, then left out.
+ */
+function styleEntry(styles, locale) {
   return styles[locale] ?? styles[new Intl.Locale(locale).language] ?? styles['*'] ?? '';
+}
+export function styleFor(styles, locale) {
+  const entry = styleEntry(styles, locale);
+  return typeof entry === 'string' ? entry : entry.note ?? '';
+}
+export function avoidFor(styles, locale) {
+  const entry = styleEntry(styles, locale);
+  return typeof entry === 'string' ? [] : entry.avoid ?? [];
 }
 
 /**
@@ -42,12 +54,17 @@ export function styleFor(styles, locale) {
  * so an interrupted run resumes where it stopped. Entries the provider cannot translate safely stay
  * absent, and the report lists them.
  */
-export async function translateCatalog({source, locales, output, provider, sourceLocale = 'en', glossaries = {}, styles = {}, context, onProgress, signal}) {
+export async function translateCatalog({source, locales, output, provider, sourceLocale = 'en', glossaries = {}, styles = {}, context, contexts = {}, onProgress, signal}) {
   const catalog = plainCatalog(await readJSON(source), source);
   for (const [key, text] of Object.entries(catalog)) {
     if (key !== text) throw new TypeError(`Catalog keys must be their source text, so a changed source is a new entry. "${key.slice(0, 80)}" differs from its value.`);
   }
   if (typeof output !== 'function') throw new TypeError('Set output to a function from locale to file path.');
+  if (!contexts || typeof contexts !== 'object' || Array.isArray(contexts) || Object.values(contexts).some(value => typeof value !== 'string')) {
+    throw new TypeError('contexts must map messages to context strings.');
+  }
+  // Own keys only: a message named "constructor" must not pick up Object.prototype.constructor.
+  const contextOf = key => Object.hasOwn(contexts, key) && contexts[key] ? contexts[key] : context;
   sourceLocale = canonicalLocale(sourceLocale);
   const keys = Object.keys(catalog);
   const targets = [...new Set(locales.map(canonicalLocale))].filter(locale => locale !== sourceLocale);
@@ -55,7 +72,7 @@ export async function translateCatalog({source, locales, output, provider, sourc
   const jobs = await Promise.all(targets.map(async locale => {
     const path = output(locale);
     const glossary = glossaryFor(glossaries, locale);
-    const engine = createEngine({sourceLocale, provider, glossary, style: styleFor(styles, locale), cacheSize: 0, batchSize: BATCH});
+    const engine = createEngine({sourceLocale, provider, glossary, style: styleFor(styles, locale), avoid: avoidFor(styles, locale), cacheSize: 0, batchSize: BATCH});
     return {locale, path, glossary, engine, existing: plainCatalog(await readJSON(path, {}), path)};
   }));
   // Locales share the provider, so its concurrency limit stays saturated across batch boundaries.
@@ -65,7 +82,8 @@ export async function translateCatalog({source, locales, output, provider, sourc
   const settled = await Promise.allSettled(jobs.map(async ({locale, path, glossary, engine, existing}) => {
     const translated = new Map();
     for (const key of keys) {
-      if (typeof existing[key] === 'string' && !validateTranslation(key, existing[key], {glossary, sourceLocale})) translated.set(key, existing[key]);
+      // A kept translation must still meet the style: one using an avoided word is translated again.
+      if (typeof existing[key] === 'string' && !validateTranslation(key, existing[key], {glossary, sourceLocale, avoid: avoidFor(styles, locale)})) translated.set(key, existing[key]);
     }
     const work = keys.filter(key => !translated.has(key));
     const failures = [];
@@ -73,7 +91,8 @@ export async function translateCatalog({source, locales, output, provider, sourc
     for (let offset = 0; offset < work.length; offset += BATCH) {
       running.throwIfAborted();
       const batch = work.slice(offset, offset + BATCH);
-      const results = await engine.translate(batch.map((key, index) => ({id: `m${offset + index}`, source: key, ...(context ? {context} : {})})), {locale, signal: running});
+      // A message's own context ("Right": "the right-hand page margin") disambiguates a short label.
+      const results = await engine.translate(batch.map((key, index) => ({id: `m${offset + index}`, source: key, ...(contextOf(key) ? {context: contextOf(key)} : {})})), {locale, signal: running});
       results.forEach((result, index) => {
         // Text without letters (" × ", "1.") is its own translation.
         if (['translated', 'source'].includes(result.status)) translated.set(batch[index], result.text);
