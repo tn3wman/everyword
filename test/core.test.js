@@ -206,6 +206,10 @@ test('review reproductions: URL parentheses, full-width paths, repeated centurie
   assert.equal(sameNumbers('two and a fifth', '5', en), false);
   assert.equal(sameNumbers('three fifths of the area', '3 der Fläche', en), false);
   assert.equal(sameNumbers('Wait five seconds.', 'Warte 5 Sekunden.', en), true);
+  assert.equal(sameNumbers('Take one a day.', 'Nimm 1 täglich.', en), true);
+  assert.equal(sameNumbers('Add a third layer.', 'Füge eine 3 Schicht hinzu.', en), false);
+  assert.ok(validateTranslation('Open https://example.com/search?q=(a(b)) now', 'Öffne https://example.com/search?q=(c(d)) jetzt'));
+  assert.equal(validateTranslation('Open https://example.com/search?q=(a(b)) now', 'Öffne https://example.com/search?q=(a(b)) jetzt'), null);
 });
 
 test('a glossary term is replaced outside URLs and placeholders only', () => {

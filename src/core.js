@@ -11,11 +11,11 @@ export function localeDirection(locale) {
   return info?.direction ?? (/^(ar|fa|he|ur|ps|sd|ug|yi)(-|$)/i.test(language.toString()) ? 'rtl' : 'ltr');
 }
 
-// These tokens are data or interpolation syntax, never natural-language copy. A URL keeps balanced
-// parentheses (wiki/Paris_(mythology)) but ends before trailing punctuation, an unbalanced ")" and
-// CJK punctuation such as the full-width parenthesis in （https://…）.
+// These tokens are data or interpolation syntax, never natural-language copy. A URL ends before
+// trailing punctuation and CJK punctuation such as the full-width parenthesis in （https://…）; it
+// ends with ")" only when it opened one itself (wiki/Paris_(mythology), ?q=(a(b))).
 // Numbered rich-text markers such as <0>, </0> and <1/> (Lingui, react-intl, i18next Trans).
-export const PROTECTED_PATTERN = /\{\{[^{}]+\}\}|\$\{[^{}]+\}|\{[\w.]+\}|%(?:\d+\$)?[-+#0]*\d*(?:\.\d+)?[sdifuxXoeEgGc]|%(?:\d+\$)?[-+#0]* [-+#0 ]*\d*(?:\.\d+)?[sdifuxXoeEgGc](?![\p{L}\p{N}])|%\([\w]+\)[sdif]|https?:\/\/(?:[^\s<>()\u3000-\u303f\uff01-\uff0f\uff1a-\uff20\uff3b-\uff40\uff5b-\uff65]|\([^\s<>()]*\))*(?:[^\s<>().,;:!?'"\]}\u3000-\u303f\uff01-\uff0f\uff1a-\uff20\uff3b-\uff40\uff5b-\uff65]|\([^\s<>()]*\))|[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}|<\/?\d+\s*\/?>/gu;
+export const PROTECTED_PATTERN = /\{\{[^{}]+\}\}|\$\{[^{}]+\}|\{[\w.]+\}|%(?:\d+\$)?[-+#0]*\d*(?:\.\d+)?[sdifuxXoeEgGc]|%(?:\d+\$)?[-+#0]* [-+#0 ]*\d*(?:\.\d+)?[sdifuxXoeEgGc](?![\p{L}\p{N}])|%\([\w]+\)[sdif]|https?:\/\/[^\s<>\u3000-\u303f\uff01-\uff0f\uff1a-\uff20\uff3b-\uff40\uff5b-\uff65]*(?:[^\s<>.,;:!?'")\]}\u3000-\u303f\uff01-\uff0f\uff1a-\uff20\uff3b-\uff40\uff5b-\uff65]|(?<=:\/\/[^\s<>]*\([^\s<>]*)\))|[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}|<\/?\d+\s*\/?>/gu;
 
 export function protectedTokens(text) {
   return (text.match(PROTECTED_PATTERN) ?? []).sort();
@@ -65,8 +65,8 @@ const MONTHS = ['january','february','march','april','may','june','july','august
 const UNITS = ['zero','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen'];
 const UNIT_ORDINALS = ['zeroth','first','second','third','fourth','fifth','sixth','seventh','eighth','ninth','tenth','eleventh','twelfth','thirteenth','fourteenth','fifteenth','sixteenth','seventeenth','eighteenth','nineteenth'];
 // Words that combine with a number word into a larger or fractional number.
-// "a"/"an" and plural ordinals make fractions: "one and a third", "three fifths".
-const NUMBER_PARTS = new Set(['hundred', 'thousand', 'million', 'billion', 'trillion', 'dozen', 'hundredth', 'thousandth', 'millionth', 'and', 'point', 'dot', 'oh', 'minus', 'negative', 'plus', 'times', 'over', 'half', 'halves', 'quarter', 'quarters', 'a', 'an']);
+// Plural ordinals make fractions: "three fifths".
+const NUMBER_PARTS = new Set(['hundred', 'thousand', 'million', 'billion', 'trillion', 'dozen', 'hundredth', 'thousandth', 'millionth', 'and', 'point', 'dot', 'oh', 'minus', 'negative', 'plus', 'times', 'over', 'half', 'halves', 'quarter', 'quarters']);
 const TENS = ['twenty','thirty','forty','fifty','sixty','seventy','eighty','ninety'];
 // English number words and the digits a translation may write for them ("fourteen peaks" → 14座山峰).
 const NUMBER_WORDS = new Map([
@@ -118,6 +118,8 @@ export function sameNumbers(source, text, {sourceLocale} = {}) {
     // Only a number word standing alone is its value: in "twenty-one", "one hundred and one" or
     // "one point five", each part is not.
     if (NUMBER_WORDS.has(lower) && (numeric(words[position - 1]) || numeric(words[position + 1]))) continue;
+    // "a third" and "an eighth" are fractions.
+    if (NUMBER_WORDS.has(lower) && /^an?$/i.test(words[position - 1] ?? '')) continue;
     const month = MONTHS.indexOf(lower);
     const value = month >= 0 && /^\p{Lu}/u.test(word) ? month + 1 : NUMBER_WORDS.get(lower);
     if (value === undefined) continue;
