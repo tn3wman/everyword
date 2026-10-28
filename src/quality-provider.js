@@ -352,12 +352,13 @@ export function qualityProvider({baseURL, model = DEFAULT_MODEL, fetch: fetchImp
       glossary = validateGlossary(glossary);
       const translated = new Map();
       const failed = new Map();
-      // One request and its preservation retries, with its own timeout. Throws the first
+      // One request and its preservation retries. Throws the first
       // preservation error when every attempt changes protected content.
       const translateUnit = async unit => {
-        const requestSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
         const unitGlossary = relevantGlossary(glossary, unit.source);
+        // Each attempt gets the full timeout, so slow failed attempts do not starve the retries.
         const attempt = async (prompt, temperature) => {
+          const requestSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
           let response;
           try {
             response = await fetchImpl(endpoint, {
