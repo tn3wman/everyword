@@ -211,7 +211,8 @@ function parseTranslation(payload, chunk, glossary = {}, sourceLocale) {
   // Usually a repetition loop, which a sampled retry breaks.
   if (choice?.finish_reason === 'length') throw preservationError('The local quality model truncated its response. Retry with shorter text.');
   const content = choice?.message?.content;
-  if (typeof content !== 'string') throw new TypeError('The local quality model returned no response text.');
+  // A malformed envelope is a service failure, not a translation the checks rejected.
+  if (typeof content !== 'string') throw requestFailure('The local quality model returned no response text.');
   let text = matchFinalStop(chunk.source, repairPlaceholders(chunk.source, content.trim()));
   if (!text) throw new TypeError('The local quality model returned invalid translation text.');
   // The model often leaves a product name in English (<1>Ridgeline</1>); put the required term in
@@ -380,7 +381,13 @@ export function qualityProvider({baseURL, model = DEFAULT_MODEL, fetch: fetchImp
           }
           if (!response?.ok) throw requestFailure(`The local quality model returned HTTP ${response?.status ?? 'unknown'}.`);
           try {
-            return parseTranslation(await response.json(), unit, unitGlossary, sourceLocale);
+            let payload;
+            try {
+              payload = await response.json();
+            } catch {
+              throw requestFailure('The local quality model returned invalid JSON.');
+            }
+            return parseTranslation(payload, unit, unitGlossary, sourceLocale);
           } catch (error) {
             if (signal?.aborted) throw signal.reason;
             if (requestSignal.aborted) throw requestFailure(error?.message || 'The local quality model request timed out.');

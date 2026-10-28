@@ -379,3 +379,12 @@ test('term enforcement leaves a URL that contains the term intact', async () => 
   const [result] = await provider.translate({...request([{id: 'pick', source: 'Choose Ridgeline at https://example.com/Ridgeline.'}]), targetLocale: 'de', glossary: {Ridgeline: 'Kammlinie'}});
   assert.deepEqual(result, {id: 'pick', text: 'Wähle Kammlinie unter https://example.com/Ridgeline.', reviewed: false});
 });
+
+test('a malformed model response is an error, not a rejected translation', async () => {
+  for (const reply of [{ok: true, json: async () => ({})}, {ok: true, json: async () => { throw new SyntaxError('Unexpected token'); }}]) {
+    const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async () => reply});
+    const [result] = await provider.translate(request([{id: 'line', source: 'Create a map of your favorite place.'}]));
+    assert.equal(result.status, 'error');
+    assert.equal(result.text, 'Create a map of your favorite place.');
+  }
+});
