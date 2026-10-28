@@ -42,7 +42,7 @@ export function styleFor(styles, locale) {
  * so an interrupted run resumes where it stopped. Entries the provider cannot translate safely stay
  * absent, and the report lists them.
  */
-export async function translateCatalog({source, locales, output, provider, sourceLocale = 'en', glossaries = {}, styles = {}, context, onProgress, signal}) {
+export async function translateCatalog({source, locales, output, provider, sourceLocale = 'en', glossaries = {}, styles = {}, context, contexts = {}, onProgress, signal}) {
   const catalog = plainCatalog(await readJSON(source), source);
   for (const [key, text] of Object.entries(catalog)) {
     if (key !== text) throw new TypeError(`Catalog keys must be their source text, so a changed source is a new entry. "${key.slice(0, 80)}" differs from its value.`);
@@ -73,7 +73,8 @@ export async function translateCatalog({source, locales, output, provider, sourc
     for (let offset = 0; offset < work.length; offset += BATCH) {
       running.throwIfAborted();
       const batch = work.slice(offset, offset + BATCH);
-      const results = await engine.translate(batch.map((key, index) => ({id: `m${offset + index}`, source: key, ...(context ? {context} : {})})), {locale, signal: running});
+      // A message's own context ("Right": "the right-hand page margin") disambiguates a short label.
+      const results = await engine.translate(batch.map((key, index) => ({id: `m${offset + index}`, source: key, ...(contexts[key] ?? context ? {context: contexts[key] ?? context} : {})})), {locale, signal: running});
       results.forEach((result, index) => {
         // Text without letters (" × ", "1.") is its own translation.
         if (['translated', 'source'].includes(result.status)) translated.set(batch[index], result.text);

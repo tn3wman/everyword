@@ -202,6 +202,16 @@ function contextEcho(chunk, text) {
 // Hy-MT2 sometimes greets the reader or echoes its prompt ("Text" → "Hey du, hier ist die
 // Übersetzung …"). Real translations, abbreviation expansions included (FAQ → अक्सर पूछे जाने वाले
 // प्रश्न), stay within this bound in measured catalogs.
+// A one- or two-word label given a context hint that comes back as a sentence, or with punctuation
+// it lacks, has usually absorbed the hint ("Gain" → "海拔上升高度，即总爬升量").
+const SENTENCE_PUNCTUATION = /[,，、;；:：。.!?！？]/u;
+function expandsLabel(chunk, text) {
+  const source = chunk.source;
+  if (!humanContext(chunk.context) || source.trim().split(/\s+/u).length > 2 || !/\p{L}/u.test(source)) return false;
+  if ([...text.matchAll(new RegExp(SENTENCE_PUNCTUATION, 'gu'))].length > [...source.matchAll(new RegExp(SENTENCE_PUNCTUATION, 'gu'))].length) return true;
+  return text.trim().split(/\s+/u).length > 4;
+}
+
 function addsText(source, text) {
   return text.length > source.length * 3 + 24;
 }
@@ -225,6 +235,7 @@ function parseTranslation(payload, chunk, glossary = {}, sourceLocale) {
 
 // Every rule a translation of chunk.source must meet; returns the text or throws.
 function checkTranslation(chunk, text, glossary, sourceLocale) {
+  if (expandsLabel(chunk, text)) throw preservationError('The local quality model turned a short label into a sentence.');
   if (addsText(chunk.source, text)) throw preservationError('The local quality model added text that is not in the source.');
   const contextMarker = /\b(?:[a-z][\w-]*(?:#[\w-]+)?:text|heading=)/u;
   if (contextMarker.test(text) && !contextMarker.test(chunk.source)) throw new TypeError('The local quality model echoed internal context.');
