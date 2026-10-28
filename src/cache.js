@@ -44,7 +44,7 @@ export function cachedProvider(provider,{storage=browserCache({storage:null}),ve
       const namespace=await revision();request.signal?.throwIfAborted();
       const glossary=Object.entries(request.glossary??{}).sort(([a],[b])=>a.localeCompare(b));
       const policy={glossary:request.glossary??{},preserveNumbers:request.preserveNumbers??true};
-      const prefix=[namespace,canonicalLocale(request.sourceLocale),canonicalLocale(request.targetLocale),glossary,policy.preserveNumbers];
+      const prefix=[namespace,canonicalLocale(request.sourceLocale),canonicalLocale(request.targetLocale),glossary,policy.preserveNumbers,...(request.style?[request.style]:[])];
       const prepared=request.segments.map(segment=>({segment,key:JSON.stringify([...prefix,segment.source,segment.context??'',segment.kind??'text'])}));
       const results=new Map(),missing=[];
       for(const {segment,key} of prepared){

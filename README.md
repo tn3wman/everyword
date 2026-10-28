@@ -101,6 +101,23 @@ Use this mode when visitors should never wait for model inference.
 
 The [prepared web example](examples/prepared-web.js) combines these steps and prevents switching to an unprepared language. A cache-only miss preserves source text. `warm` exits with code 2 if some strings could not be prepared, rather than claiming completion.
 
+## Translate message catalogs
+
+Apps that extract their copy into a source-keyed JSON catalog, as Lingui and gettext do (`{"Save": "Save"}`), can generate every other language from it:
+
+```sh
+npx everyword catalog --source locales/en.json --locales es,de,fr,zh-CN,hi \
+  --output 'locales/{locale}.json' --glossary glossary.json --style style.json
+```
+
+Each run translates only messages a language's file lacks, keeps the rest, drops keys that left the source, and writes after every batch, so an interrupted run resumes where it stopped. A translation is kept only when its placeholders, numbered rich-text markers (`<0>…</0>`, `<1/>`), digit sequences and glossary terms match the source; the run lists anything it left out and exits with code 2, and the next run retries it. To retranslate a message, delete its entry.
+
+- `glossary.json` maps terms per language, with `"*"` for every language: `{"*": {"Acme": "Acme"}, "de": {"Ridgeline": "Ridgeline"}}`. Source terms match whole words case-sensitively, so a product named "Contours" leaves the word "contours" free.
+- `style.json` gives each language a short note, such as `{"de": "Address the reader informally with du, never Sie."}`. Hy-MT2 follows register notes reliably.
+- `--context` adds background to every message. Hy-MT2 can copy context into short translations; Everyword rejects output that repeats it, but catalogs translate best without it.
+
+The local runtime runs 16 concurrent sequences on machines with at least 48 GB of memory, 8 with 24 GB and 4 otherwise; set `EVERYWORD_PARALLEL` to override. On an M1 Max, 16 sequences produced about twice the throughput of 4.
+
 ## Your database, your data
 
 SQLite defaults to `.everyword/translations.sqlite` in the app project. You can choose another path with `--cache-path`. PostgreSQL uses additive `everyword_translations` tables, with namespaces separating applications:
@@ -129,7 +146,7 @@ The local providers do not send text to a cloud translation API. Initial setup d
 
 Native view discovery is the host application's responsibility. Image pixels, canvas text, closed shadow roots, unvisited states, and operating-system-owned menus are not automatically covered. Rich HTML and ICU plural/select messages need appropriate parsing or message-format integrations. Layout checks are diagnostics, not a guarantee that every translated screen fits.
 
-Validation checks structure and formatting, not linguistic accuracy. Numeric comparison currently compares digit tokens, so it can reject equivalent spelled-out or localized number formats and does not establish that values retain their meaning or position. Such results retain the source text and are not cached. Generated translations are marked unreviewed. Fluent output can still be wrong; test your actual languages and interfaces.
+Validation checks structure and formatting, not linguistic accuracy. Numeric comparison compares digit sequences in any script, ignoring grouping and decimal separators (1,670 and 1.670 match), and allows the month number of a named month (April 12 → 4月12日). It rejects spelled-out numbers and does not establish that values keep their meaning or position. Such results retain the source text and are not cached. Generated translations are marked unreviewed. Fluent output can still be wrong; test your actual languages and interfaces.
 
 ## Development
 

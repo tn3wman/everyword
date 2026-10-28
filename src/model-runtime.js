@@ -3,7 +3,7 @@ import {createServer} from 'node:net';
 import {mkdir,stat,rename,unlink} from 'node:fs/promises';
 import {createReadStream,createWriteStream} from 'node:fs';
 import {createHash} from 'node:crypto';
-import {homedir} from 'node:os';
+import {homedir,totalmem} from 'node:os';
 import {join} from 'node:path';
 import {pipeline} from 'node:stream/promises';
 import {Transform} from 'node:stream';
@@ -13,6 +13,18 @@ import {setTimeout as delay} from 'node:timers/promises';
 // https://huggingface.co/tencent/Hy-MT2-7B-GGUF
 export const QUALITY_MODEL={name:'Hy-MT2-7B Q8_0',revision:'ab8472660ac61fac25f1af43fac2599d52a8a775',size:7981928896,
   hash:'58b3ad55dd6f6fa08c695cddc34fb5f8f708a844f78ae10508071914b0ed67c0'};
+/**
+ * Concurrent sequences for the resident model. Batching raises throughput: on an M1 Max with 64 GB,
+ * 16 slots produced 2.1 times the tokens per second of 4. Each slot holds a 6,144-token context,
+ * enough for a 1,500-character chunk, the prompt and a 3,072-token reply.
+ */
+export function modelParallelism(){
+  const configured=Number(process.env.EVERYWORD_PARALLEL);
+  if(Number.isInteger(configured)&&configured>=1&&configured<=64)return configured;
+  const gigabytes=totalmem()/2**30;
+  return gigabytes>=48?16:gigabytes>=24?8:4;
+}
+const SLOT_CONTEXT=6144;
 const cacheRoot=()=>process.env.EVERYWORD_CACHE_DIR??join(homedir(),'.cache/everyword');
 const modelPath=()=>join(cacheRoot(),'models/hy-mt2-7b-q8/model.gguf');
 
@@ -20,7 +32,8 @@ export function llamaExecutable(){
   const binary=process.env.EVERYWORD_LLAMA_SERVER??'llama-server';
   // Some CUDA builds initialize a GPU even for --version. A busy GPU must not
   // make an installed executable look missing. Inference keeps its normal env.
-  const probe=spawnSync(binary,['--version'],{stdio:'ignore',timeout:10000,env:{...process.env,CUDA_VISIBLE_DEVICES:''}});
+  // The first run of a new binary can take longer while macOS verifies it.
+  const probe=spawnSync(binary,['--version'],{stdio:'ignore',timeout:60000,env:{...process.env,CUDA_VISIBLE_DEVICES:''}});
   if(probe.status!==0)throw Object.assign(new Error('Install llama-server from https://github.com/ggml-org/llama.cpp, then run npm run setup. Or use --engine fast for the smaller offline engine.'),{userFacing:true});
   return binary;
 }
@@ -74,7 +87,7 @@ export function modelRuntime({baseURL}={}){
         controller.signal.throwIfAborted();
         loading={model:QUALITY_MODEL.name,phase:'loading'};
         const port=await freePort();url=`http://127.0.0.1:${port}/v1`;
-        child=spawn(binary,['--model',path,'--host','127.0.0.1','--port',String(port),'--ctx-size','32768','--parallel','4','--gpu-layers','99','--threads','8','--no-context-shift','--log-disable'],{stdio:'ignore'});
+        child=spawn(binary,['--model',path,'--host','127.0.0.1','--port',String(port),'--ctx-size',String(SLOT_CONTEXT*modelParallelism()),'--parallel',String(modelParallelism()),'--gpu-layers','99','--threads','8','--no-context-shift','--log-disable'],{stdio:'ignore'});
         const owned=child;
         owned.on('error',()=>{if(child===owned)ready=false;});
         owned.on('exit',()=>{if(child===owned){ready=false;startPromise=undefined;url=undefined;}});

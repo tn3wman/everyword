@@ -21,6 +21,7 @@
     "./storage": "./src/storage.js",
     "./project": "./src/project.js",
     "./warm": "./src/warm.js",
+    "./catalog": "./src/catalog.js",
     "./quality": "./src/quality-provider.js",
     "./local-quality": "./src/local-quality.js",
     "./model-runtime": "./src/model-runtime.js",
