@@ -381,7 +381,7 @@ test('term enforcement leaves a URL that contains the term intact', async () => 
 });
 
 test('a malformed model response is an error, not a rejected translation', async () => {
-  for (const reply of [{ok: true, json: async () => ({})}, {ok: true, json: async () => { throw new SyntaxError('Unexpected token'); }}]) {
+  for (const reply of [{ok: true, json: async () => ({})}, {ok: true, json: async () => ({choices: [{finish_reason: 'length', message: {}}]})}, {ok: true, json: async () => { throw new SyntaxError('Unexpected token'); }}]) {
     const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async () => reply});
     const [result] = await provider.translate(request([{id: 'line', source: 'Create a map of your favorite place.'}]));
     assert.equal(result.status, 'error');

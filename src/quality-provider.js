@@ -208,11 +208,11 @@ function addsText(source, text) {
 
 function parseTranslation(payload, chunk, glossary = {}, sourceLocale) {
   const choice = payload?.choices?.[0];
-  // Usually a repetition loop, which a sampled retry breaks.
-  if (choice?.finish_reason === 'length') throw preservationError('The local quality model truncated its response. Retry with shorter text.');
   const content = choice?.message?.content;
   // A malformed envelope is a service failure, not a translation the checks rejected.
   if (typeof content !== 'string') throw requestFailure('The local quality model returned no response text.');
+  // Usually a repetition loop, which a sampled retry breaks.
+  if (choice.finish_reason === 'length') throw preservationError('The local quality model truncated its response. Retry with shorter text.');
   let text = matchFinalStop(chunk.source, repairPlaceholders(chunk.source, content.trim()));
   if (!text) throw new TypeError('The local quality model returned invalid translation text.');
   // The model often leaves a product name in English (<1>Ridgeline</1>); put the required term in
