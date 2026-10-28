@@ -356,9 +356,13 @@ export function qualityProvider({baseURL, model = DEFAULT_MODEL, fetch: fetchImp
       // preservation error when every attempt changes protected content.
       const translateUnit = async unit => {
         const unitGlossary = relevantGlossary(glossary, unit.source);
-        // Each attempt gets the full timeout, so slow failed attempts do not starve the retries.
+        const maxTokens = Math.min(3072, Math.max(256, Math.ceil(unit.source.length * 1.8)));
+        // Each attempt gets its own timeout, so slow failed attempts do not starve the retries, and
+        // timeoutMs covers each 1,024 tokens it may generate: a long Hindi passage can need 3,000
+        // tokens while every slot of the server is busy.
+        const attemptTimeout = timeoutMs * Math.max(1, maxTokens / 1024);
         const attempt = async (prompt, temperature) => {
-          const requestSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
+          const requestSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(attemptTimeout)]) : AbortSignal.timeout(attemptTimeout);
           let response;
           try {
             response = await fetchImpl(endpoint, {
@@ -366,7 +370,7 @@ export function qualityProvider({baseURL, model = DEFAULT_MODEL, fetch: fetchImp
               headers: {'Content-Type': 'application/json'},
               body: JSON.stringify({
                 model, temperature,
-                max_tokens: Math.min(3072, Math.max(256, Math.ceil(unit.source.length * 1.8))),
+                max_tokens: maxTokens,
                 messages: [{role: 'user', content: prompt}],
               }),
             });
