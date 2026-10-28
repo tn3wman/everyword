@@ -192,7 +192,9 @@ test('a century may be written as a Roman numeral, and a URL ends before trailin
   assert.equal(sameNumbers('dug in the 17th century', 'excavado en el siglo XVII', {sourceLocale: 'fr'}), false);
   assert.deepEqual(protectedTokens('Stripe (https://stripe.com/privacy); Mapbox https://mapbox.com/a.'), ['https://mapbox.com/a', 'https://stripe.com/privacy']);
   assert.equal(validateTranslation('Read (https://stripe.com/privacy); then go.', 'Lies (https://stripe.com/privacy) und geh.'), null);
-  assert.equal(validateTranslation('Read (https://stripe.com/privacy); then go.', '阅读（https://stripe.com/privacy）；然后走。'), null);
+  // A URL runs to whitespace: CJK text glued to it is part of the token, which fails safe.
+  assert.equal(validateTranslation('Read (https://stripe.com/privacy);', '阅读（https://stripe.com/privacy）；'), null);
+  assert.ok(validateTranslation('Read (https://stripe.com/privacy); then go.', '阅读（https://stripe.com/privacy）；然后走。'));
 });
 
 test('review reproductions: URL parentheses, full-width paths, repeated centuries and fractions', () => {
@@ -217,4 +219,12 @@ test('review reproductions: URL parentheses, full-width paths, repeated centurie
 test('a glossary term is replaced outside URLs and placeholders only', () => {
   assert.equal(replaceTerm('Wähle Ridgeline unter https://example.com/Ridgeline.', 'Ridgeline', 'Kammlinie'), 'Wähle Kammlinie unter https://example.com/Ridgeline.');
   assert.equal(replaceTerm('{Ridgeline} and Ridgeline', 'Ridgeline', 'X'), '{Ridgeline} and X');
+});
+
+test('a URL change hidden behind full-width punctuation, an uppercase scheme or quotation marks is caught', () => {
+  assert.ok(validateTranslation('Open https://trusted.example now', 'Öffne https://trusted.example／@evil.example jetzt'));
+  assert.ok(validateTranslation('Open HTTPS://example.com now', 'Öffne HTTPS://evil.example jetzt'));
+  assert.equal(validateTranslation('Open HTTPS://example.com now', 'Öffne HTTPS://example.com jetzt'), null);
+  assert.equal(replaceTerm('https://example.com/a。Ridgeline', 'Ridgeline', 'Kammlinie'), 'https://example.com/a。Ridgeline');
+  assert.equal(validateTranslation('Read “https://example.com/a”.', 'Lies „https://example.com/a“.'), null);
 });

@@ -13,8 +13,8 @@ export function localeDirection(locale) {
 
 // These tokens are data or interpolation syntax, never natural-language copy.
 // Numbered rich-text markers such as <0>, </0> and <1/> (Lingui, react-intl, i18next Trans).
-// A URL stops at whitespace and CJK punctuation such as the full-width parenthesis in （https://…）.
-const PROTECTED_PATTERN = /\{\{[^{}]+\}\}|\$\{[^{}]+\}|\{[\w.]+\}|%(?:\d+\$)?[-+#0]*\d*(?:\.\d+)?[sdifuxXoeEgGc]|%(?:\d+\$)?[-+#0]* [-+#0 ]*\d*(?:\.\d+)?[sdifuxXoeEgGc](?![\p{L}\p{N}])|%\([\w]+\)[sdif]|https?:\/\/[^\s<>\u3000-\u303f\uff01-\uff0f\uff1a-\uff20\uff3b-\uff40\uff5b-\uff65]+|[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}|<\/?\d+\s*\/?>/gu;
+// A URL runs to whitespace, so anything glued to it (／@evil.example) stays part of the token.
+const PROTECTED_PATTERN = /\{\{[^{}]+\}\}|\$\{[^{}]+\}|\{[\w.]+\}|%(?:\d+\$)?[-+#0]*\d*(?:\.\d+)?[sdifuxXoeEgGc]|%(?:\d+\$)?[-+#0]* [-+#0 ]*\d*(?:\.\d+)?[sdifuxXoeEgGc](?![\p{L}\p{N}])|%\([\w]+\)[sdif]|[Hh][Tt][Tt][Pp][Ss]?:\/\/[^\s<>]+|[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}|<\/?\d+\s*\/?>/gu;
 
 // A URL ends before trailing punctuation, and before a ")" it did not open itself, so
 // "(https://x.org/a)." gives https://x.org/a while wiki/Paris_(mythology) and ?q=(a(b)) stay whole.
@@ -22,7 +22,8 @@ function urlEnd(url) {
   let end = url.length;
   for (;;) {
     const last = url[end - 1];
-    if (/[.,;:!?'"\]}]/u.test(last)) end--;
+    // ASCII, CJK and full-width punctuation and quotation marks: （https://…）；, „https://…“.
+    if (/[.,;:!?'"\]}\u00ab\u00bb\u2018-\u201f\u2039\u203a\u3000-\u303f\uff01-\uff0f\uff1a-\uff20\uff3b-\uff40\uff5b-\uff65]/u.test(last)) end--;
     else if (last === ')' && url.slice(0, end).split(')').length > url.slice(0, end).split('(').length) end--;
     else return end;
   }
@@ -32,7 +33,7 @@ function urlEnd(url) {
 export function protectedSpans(text) {
   return [...text.matchAll(PROTECTED_PATTERN)].map(match => ({
     index: match.index,
-    token: /^https?:/u.test(match[0]) ? match[0].slice(0, urlEnd(match[0])) : match[0],
+    token: /^https?:/iu.test(match[0]) ? match[0].slice(0, urlEnd(match[0])) : match[0],
   }));
 }
 
