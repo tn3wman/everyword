@@ -260,6 +260,13 @@ function checkTranslation(chunk, text, glossary, sourceLocale) {
   for (const [term, replacement] of Object.entries(glossary)) {
     if (!hasTerm(text, replacement, {ignoreCase: true})) throw preservationError(`The local quality model did not use the required translation of "${term}".`);
   }
+  // Checked last, so a translation that only uses a discouraged word is otherwise valid and can be
+  // kept when no retry avoids it.
+  for (const word of chunk.discourage ?? []) {
+    if (hasTerm(text, word) && !hasTerm(chunk.source, word)) {
+      throw Object.assign(preservationError(`The local quality model used "${word}", which the style discourages.`), {fallback: text});
+    }
+  }
   return text;
 }
 
@@ -342,7 +349,8 @@ function buildPreservationRetryPrompt(options) {
   ];
   if (tokens.length) requirements.push(`These protected tokens must remain unchanged: ${tokens.map(value => JSON.stringify(value)).join(', ')}`);
   if (Object.keys(options.glossary).length) requirements.push('Use each required translation below exactly as written.');
-  if (chunk.avoid?.length) requirements.push(`Do not use these words: ${chunk.avoid.map(word => JSON.stringify(word)).join(', ')}.`);
+  const unwanted = [...(chunk.avoid ?? []), ...(chunk.discourage ?? [])];
+  if (unwanted.length) requirements.push(`Do not use these words: ${unwanted.map(word => JSON.stringify(word)).join(', ')}.`);
   return `${requirements.join('\n')}\n\n${buildPrompt(options)}`;
 }
 
@@ -362,7 +370,7 @@ export function qualityProvider({baseURL, model = DEFAULT_MODEL, fetch: fetchImp
       model === DEFAULT_MODEL ? MODEL_REVISION : 'custom',
       model === DEFAULT_MODEL ? MODEL_SHA256 : 'custom',
     ]),
-    async translate({sourceLocale, targetLocale, segments, glossary = {}, style = '', avoid = [], signal} = {}) {
+    async translate({sourceLocale, targetLocale, segments, glossary = {}, style = '', avoid = [], discourage = [], signal} = {}) {
       signal?.throwIfAborted();
       if (!Array.isArray(segments)) throw new TypeError('Quality translation segments must be an array.');
       if (segments.length > 10000) throw new TypeError('Quality translation accepts at most 10,000 segments.');
@@ -373,7 +381,7 @@ export function qualityProvider({baseURL, model = DEFAULT_MODEL, fetch: fetchImp
       signal?.throwIfAborted();
       const endpoint = validateEndpoint(resolvedBaseURL);
       const {chunks, layouts} = prepareChunks(segments);
-      for (const chunk of chunks) chunk.avoid = avoid;
+      for (const chunk of chunks) Object.assign(chunk, {avoid, discourage});
       glossary = validateGlossary(glossary);
       const translated = new Map();
       const failed = new Map();
@@ -423,6 +431,8 @@ export function qualityProvider({baseURL, model = DEFAULT_MODEL, fetch: fetchImp
           return await attempt(buildPrompt(options), 0);
         } catch (error) {
           if (error?.code !== 'changed-protected-content') throw error;
+          // A valid translation that only uses a discouraged word, kept if no retry does better.
+          let fallback = error.fallback;
           // Keep the cache key stable. These requests only repair rejected uncached output; they do
           // not change prompts for accepted translations already in the cache. A greedy retry
           // repeats the same mistake word for word, so the last one samples.
@@ -431,8 +441,10 @@ export function qualityProvider({baseURL, model = DEFAULT_MODEL, fetch: fetchImp
               return await attempt(buildPreservationRetryPrompt(options), temperature);
             } catch (retryError) {
               if (retryError?.code === 'request-failed' || signal?.aborted) throw retryError;
+              fallback ??= retryError?.fallback;
             }
           }
+          if (fallback !== undefined) return fallback;
           throw error;
         }
       };
@@ -459,7 +471,15 @@ export function qualityProvider({baseURL, model = DEFAULT_MODEL, fetch: fetchImp
                   const translation = /\p{L}/u.test(text) ? await translateUnit({...chunk, source: text}) : text;
                   parts.push(translation + (NO_SPACES.has(new Intl.Locale(target.locale).language) && /^ +$/u.test(trailing) ? '' : trailing));
                 }
-                translated.set(chunk.id, checkTranslation(chunk, parts.join(''), relevantGlossary(glossary, chunk.source), sourceLocale));
+                let joined;
+                try {
+                  joined = checkTranslation(chunk, parts.join(''), relevantGlossary(glossary, chunk.source), sourceLocale);
+                } catch (joinError) {
+                  // Sentences kept despite a discouraged word stay acceptable once joined.
+                  if (joinError?.fallback === undefined) throw joinError;
+                  joined = joinError.fallback;
+                }
+                translated.set(chunk.id, joined);
                 return;
               } catch (sentenceError) {
                 if (signal?.aborted) throw signal.reason;

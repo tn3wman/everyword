@@ -429,3 +429,17 @@ test('a translation using a word the style avoids is retried with that word name
   assert.equal(rejected.status, 'rejected');
   assert.match(rejected.reason, /"Sie", which the style avoids/);
 });
+
+test('a discouraged word is retried away when possible and kept when the model insists', async () => {
+  const replies = ['Geben Sie ein Datum ein.', 'Gib ein Datum ein.'];
+  let call = 0;
+  const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async () => response(replies[Math.min(call++, 1)])});
+  const [steered] = await provider.translate({...request([{id: 'd', source: 'Enter a date.'}]), targetLocale: 'de', discourage: ['Sie']});
+  assert.deepEqual(steered, {id: 'd', text: 'Gib ein Datum ein.', reviewed: false});
+  const insistent = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async () => response('Geben Sie ein Datum ein.')});
+  const [kept] = await insistent.translate({...request([{id: 'd', source: 'Enter a date.'}]), targetLocale: 'de', discourage: ['Sie']});
+  assert.deepEqual(kept, {id: 'd', text: 'Geben Sie ein Datum ein.', reviewed: false});
+  const broken = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async () => response('Geben Sie ein Datum ein')});
+  const [numberless] = await broken.translate({...request([{id: 'n', source: 'Enter 3 dates.'}]), targetLocale: 'de', discourage: ['Sie']});
+  assert.equal(numberless.status, 'rejected');
+});
