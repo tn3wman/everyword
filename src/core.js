@@ -12,19 +12,85 @@ export function localeDirection(locale) {
 }
 
 // These tokens are data or interpolation syntax, never natural-language copy.
+// Numbered rich-text markers such as <0>, </0> and <1/> (Lingui, react-intl, i18next Trans).
+export const PROTECTED_PATTERN = /\{\{[^{}]+\}\}|\$\{[^{}]+\}|\{[\w.]+\}|%(?:\d+\$)?[-+#0 ]*\d*(?:\.\d+)?[sdifuxXoeEgGc]|%\([\w]+\)[sdif]|https?:\/\/[^\s<>]+|[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}|<\/?\d+\s*\/?>/gu;
+
 export function protectedTokens(text) {
-  return (text.match(/\{\{[^{}]+\}\}|\$\{[^{}]+\}|\{[\w.]+\}|%(?:\d+\$)?[-+#0 ]*\d*(?:\.\d+)?[sdifuxXoeEgGc]|%\([\w]+\)[sdif]|https?:\/\/[^\s<>]+|[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}/g) ?? []).sort();
+  return (text.match(PROTECTED_PATTERN) ?? []).sort();
 }
 
-function numbers(text) {
-  return (text.replace(/[٠-٩۰-۹]/g, x => String(x.charCodeAt(0) - (x >= '۰' ? 0x6f0 : 0x660)))
+/** Numbered markers must close in order, so a translation cannot interleave or orphan them. */
+export function balancedMarkers(text) {
+  const open = [];
+  for (const [marker, closing, id, selfClosing] of text.matchAll(/<(\/?)(\d+)\s*(\/?)>/g)) {
+    if (selfClosing) continue;
+    if (!closing) open.push(id);
+    else if (open.pop() !== id) return false;
+  }
+  return open.length === 0;
+}
+
+let digitValues;
+// Every decimal digit Intl can format (Devanagari, Han decimal, Arabic-Indic, ...) as its ASCII value.
+function asciiDigits(text) {
+  if (!digitValues) {
+    digitValues = new Map();
+    for (const numberingSystem of Intl.supportedValuesOf?.('numberingSystem') ?? []) {
+      try {
+        const format = new Intl.NumberFormat('en', {numberingSystem, useGrouping: false});
+        for (let digit = 0; digit <= 9; digit++) {
+          const glyph = format.format(digit);
+          if ([...glyph].length === 1 && glyph !== String(digit)) digitValues.set(glyph, String(digit));
+        }
+      } catch {}
+    }
+  }
+  // Only decimal digits (\p{Nd}). Han numerals (一, 二) are words: "一座山" is "a mountain".
+  return text.replace(/\p{Nd}/gu, digit => digitValues.get(digit) ?? digit);
+}
+
+/**
+ * Digit sequences, compared as a sorted multiset. Grouping and decimal separators between digits are
+ * removed on both sides, so 1,670, 1.670, 1 670 and 1670 or Indian 5,22,427 and 522,427 compare equal.
+ */
+export function numericTokens(text) {
+  return (asciiDigits(text)
+    .replace(/(?<=\d)[,.'’   ٫٬](?=\d)|(?<=\d) (?=\d{3}(?!\d))/gu, '')
     .match(/\d+/g) ?? []).sort();
 }
 
+const MONTHS = ['january','february','march','april','may','june','july','august','september','october','november','december'];
+
+/**
+ * The translation keeps every digit sequence of the source. It may add a month's number only for a
+ * month the English source names, as Chinese, Japanese and Korean dates write "April 12" as 4月12日.
+ */
+export function sameNumbers(source, text) {
+  const extra = numericTokens(text);
+  for (const token of numericTokens(source)) {
+    const index = extra.indexOf(token);
+    if (index < 0) return false;
+    extra.splice(index, 1);
+  }
+  const months = source.match(/\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\b/g) ?? [];
+  for (const month of months) {
+    const index = extra.indexOf(String(MONTHS.indexOf(month.toLowerCase()) + 1));
+    if (index >= 0) extra.splice(index, 1);
+  }
+  return extra.length === 0;
+}
+
 function sameTokens(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
-function hasTerm(text, term) {
-  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, 'iu').test(text);
+/**
+ * Whole-word match. Source terms match case-sensitively, as DeepL and Google glossaries do, so a
+ * product name such as "Contours" does not claim the ordinary word "contours". A required
+ * translation may change case, as sentence position or German nouns demand.
+ */
+// Scripts written without spaces between words: a neighbouring character there never extends a word.
+const WORD = '[[\\p{L}\\p{N}_]--[\\p{sc=Han}\\p{sc=Hiragana}\\p{sc=Katakana}\\p{sc=Thai}\\p{sc=Lao}\\p{sc=Khmer}\\p{sc=Myanmar}\\p{sc=Tibetan}]]';
+export function hasTerm(text, term, {ignoreCase = false} = {}) {
+  const escaped = term.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+  return new RegExp(`(?<!${WORD})${escaped}(?!${WORD})`, ignoreCase ? 'iv' : 'v').test(text);
 }
 
 export function validateTranslation(source, text, {glossary = {}, preserveNumbers = true} = {}) {
@@ -34,9 +100,10 @@ export function validateTranslation(source, text, {glossary = {}, preserveNumber
   if (/<\/?[a-zA-Z][^>]*>/.test(source)) return 'HTML messages require the DOM adapter or a parsed HTML integration.';
   if (/<\/?[a-zA-Z][^>]*>/.test(text)) return 'The provider added HTML to a plain-text translation.';
   if (!sameTokens(protectedTokens(source), protectedTokens(text))) return 'The translation changed a placeholder, URL, or email address.';
-  if (preserveNumbers && !sameTokens(numbers(source), numbers(text))) return 'The translation changed a numeric value.';
+  if (!balancedMarkers(text)) return 'The translation misplaced a numbered rich-text marker.';
+  if (preserveNumbers && !sameNumbers(source, text)) return 'The translation changed a numeric value.';
   for (const [term, replacement] of Object.entries(glossary)) {
-    if (hasTerm(source, term) && !hasTerm(text, replacement)) return `The translation did not preserve the glossary term "${term}".`;
+    if (hasTerm(source, term) && !hasTerm(text, replacement, {ignoreCase: true})) return `The translation did not preserve the glossary term "${term}".`;
   }
   return null;
 }
@@ -49,9 +116,11 @@ export function summarize(results, locale, issues = []) {
     issues, segments: results};
 }
 
-export function createEngine({sourceLocale = 'en', provider, requireReviewed = false, glossary = {}, preserveNumbers = true, cacheSize = 2000, batchSize = 64} = {}) {
+export function createEngine({sourceLocale = 'en', provider, requireReviewed = false, glossary = {}, style = '', preserveNumbers = true, cacheSize = 2000, batchSize = 64} = {}) {
   sourceLocale = canonicalLocale(sourceLocale);
   if (!provider || typeof provider.translate !== 'function') throw new TypeError('A translation provider is required.');
+  // A target-language style note for the translator, such as "Address the reader with du."
+  if (typeof style !== 'string' || style.length > 500) throw new TypeError('style must be a string of at most 500 characters.');
   if (!Number.isInteger(cacheSize) || cacheSize < 0 || !Number.isInteger(batchSize) || batchSize < 1 || batchSize > 256) throw new TypeError('Invalid cache or batch size.');
   let policy;
   let epoch = 0;
@@ -104,7 +173,7 @@ export function createEngine({sourceLocale = 'en', provider, requireReviewed = f
         const request = batch.map((p, index) => ({id: `s${offset + index}`, source: p.source, context: p.s.context ?? '', kind: p.s.kind ?? 'text'}));
         let outputs;
         try {
-          outputs = await provider.translate({sourceLocale, targetLocale: locale, segments: request, glossary: requestPolicy.glossary, signal});
+          outputs = await provider.translate({sourceLocale, targetLocale: locale, segments: request, glossary: requestPolicy.glossary, ...(style ? {style} : {}), signal});
           signal?.throwIfAborted();
           if (!Array.isArray(outputs)) throw new TypeError('The provider response must be an array.');
           const outputIds = new Set();

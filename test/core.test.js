@@ -106,3 +106,45 @@ test('plain-text translation cannot introduce markup or rewrite an HTML message 
   assert.ok(validateTranslation('<p>Hello</p>','<p>Hola</p>'));
   assert.equal(validateTranslation('Use a < b in the formula','Usa a < b en la fórmula'),null);
 });
+
+test('numbered rich-text markers are protected and must stay balanced', () => {
+  assert.equal(validateTranslation('Read the <0>terms</0> and <1/>.', 'Lee <1/> y los <0>términos</0>.'), null);
+  assert.ok(validateTranslation('Read the <0>terms</0>.', 'Lee los términos.'));
+  assert.ok(validateTranslation('Read the <0>terms</0>.', 'Lee los </0>términos<0>.'));
+  assert.ok(validateTranslation('<0>A</0> <1>B</1>', '<0>A <1>B</0></1>'));
+});
+
+test('numbers compare across scripts, grouping and decimal separators', () => {
+  for (const [source, text] of [
+    ['About 1,670 m', 'Etwa 1.670 m'], ['About 1,670 m', '约1670米'], ['0.12 to 0.16 mm', '0,12 bis 0,16 mm'],
+    ['522,427 acres', '5,22,427 एकड़'], ['Height 8,726 feet', 'ऊंचाई ८,७२६ फीट'], ['1 670 m', '1 670 m'],
+  ]) assert.equal(validateTranslation(source, text), null, `${source} -> ${text}`);
+  for (const [source, text] of [['About 1,670 m', 'Etwa 1.680 m'], ['18 × 24 inches', '18 × 42 Zoll'], ['Height 8,726', 'ऊंचाई ८,७२७']]) {
+    assert.ok(validateTranslation(source, text), `${source} -> ${text}`);
+  }
+});
+
+test('glossary source terms match whole words case-sensitively', () => {
+  const glossary = {Contours: 'Contours'};
+  assert.ok(validateTranslation('Choose Contours', 'Elige Curvas', {glossary}));
+  assert.equal(validateTranslation('Trace the contours', 'Traza las curvas', {glossary}), null);
+  assert.equal(validateTranslation('Choose Contours', 'Elige contours', {glossary}), null);
+});
+
+test('glossary terms match inside scripts written without spaces', () => {
+  assert.equal(validateTranslation('On the Strata poster', '在展示地层的海报上', {glossary: {Strata: '地层'}}), null);
+  assert.equal(validateTranslation('Printed Canyon uses it', 'Printed Canyon使用它', {glossary: {'Printed Canyon': 'Printed Canyon'}}), null);
+  assert.ok(validateTranslation('Choose Strata', 'Choose Stratagem', {glossary: {Strata: 'Strata'}}));
+  assert.equal(validateTranslation('A (B) C', 'x (B) y', {glossary: {'(B)': '(B)'}}), null);
+});
+
+test('glossary terms may contain regular expression punctuation', () => {
+  assert.equal(validateTranslation('A 3D Terrain Model.', 'Ein 3D-Geländemodell.', {glossary: {'3D Terrain Model': '3D-Geländemodell'}}), null);
+  assert.equal(validateTranslation('Use a/b now', 'Usa a/b ya', {glossary: {'a/b': 'a/b'}}), null);
+});
+
+test('dates may write a named month as its number', () => {
+  assert.equal(validateTranslation('Founded on April 12, 1929.', '成立于1929年4月12日。'), null);
+  assert.ok(validateTranslation('Founded on April 12, 1929.', '成立于1929年5月12日。'));
+  assert.ok(validateTranslation('Founded in 1929.', '成立于1929年4月。'));
+});

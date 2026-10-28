@@ -159,14 +159,14 @@ test('retries one numeric preservation failure with explicit literal requirement
   assert.match(prompts[1], /must not contain numeric digits/);
 });
 
-test('keeps the first protection failure when the one retry is also unsafe', async () => {
-  let calls = 0;
-  const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async () => {
-    calls++;
-    return response(calls === 1 ? 'Hola {nombre}, 42.' : 'Hola {name}, 43.');
+test('keeps the first protection failure when both retries are also unsafe, sampling the last', async () => {
+  const temperatures = [];
+  const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async (_url, options) => {
+    temperatures.push(JSON.parse(options.body).temperature);
+    return response(temperatures.length === 1 ? 'Hola {nombre}, 42.' : 'Hola {name}, 43.');
   }});
   const [result] = await provider.translate(request([{id: 'one', source: 'Hello {name}, 42.'}]));
-  assert.equal(calls, 2);
+  assert.deepEqual(temperatures, [0, 0, 0.5]);
   assert.equal(result.status, 'rejected');
   assert.match(result.reason, /changed a placeholder/);
 });
@@ -234,7 +234,7 @@ test('mixed cached results retry only the rejected segment and recover', async (
   repaired = true;
   const second = await createEngine({provider: cached}).translate(segments, {locale: 'es'});
   assert.deepEqual(second.map(({text, status}) => [text, status]), [['Hola', 'translated'], ['Cuenta 42', 'translated']]);
-  assert.deepEqual(calls, ['Hello', 'Count 42', 'Count 42', 'Count 42']);
+  assert.deepEqual(calls, ['Hello', 'Count 42', 'Count 42', 'Count 42', 'Count 42']);
 });
 
 test('propagates request cancellation to active calls and removes queued work', async () => {
@@ -251,4 +251,63 @@ test('propagates request cancellation to active calls and removes queued work', 
   controller.abort(new DOMException('Canceled by test.', 'AbortError'));
   await assert.rejects(pending, error => error.name === 'AbortError');
   assert.equal(calls, 4);
+});
+
+test('repairs mistyped placeholder braces and drops a period the label never had', async () => {
+  const replies = {'Remove {name}': 'Entferne {name>.', 'Pay what you want.': 'Zahle, was du willst.'};
+  const provider = qualityProvider({baseURL: 'http://127.0.0.1:41234/v1', fetch: async (url, options) =>
+    response(replies[sourceFromPrompt(JSON.parse(options.body).messages[0].content)])});
+  const result = await provider.translate(request([
+    {id: 'a', source: 'Remove {name}'}, {id: 'b', source: 'Pay what you want.'},
+  ], {targetLocale: 'de'}));
+  assert.deepEqual(result.map(r => r.text), ['Entferne {name}', 'Zahle, was du willst.']);
+});
+
+test('retries a translation that left out a required glossary term', async () => {
+  const prompts = [];
+  const provider = qualityProvider({baseURL: 'http://127.0.0.1:41234/v1', fetch: async (url, options) => {
+    prompts.push(JSON.parse(options.body).messages[0].content);
+    return response(prompts.length === 1 ? '在展示地层的海报上' : '在地层海报上');
+  }});
+  const glossary = {Strata: '地层', Contours: '等高线'};
+  const [first] = await provider.translate(request([{id: 'a', source: 'On the Strata poster'}], {targetLocale: 'zh-CN', glossary}));
+  assert.equal(first.text, '在展示地层的海报上');
+  assert.equal(prompts.length, 1);
+  prompts.length = 0;
+  let replies = ['在海报上', '在地层海报上'];
+  const retrying = qualityProvider({baseURL: 'http://127.0.0.1:41234/v1', fetch: async (url, options) => {
+    prompts.push(JSON.parse(options.body).messages[0].content);
+    return response(replies.shift());
+  }});
+  const [second] = await retrying.translate(request([{id: 'a', source: 'On the Strata poster'}], {targetLocale: 'zh-CN', glossary}));
+  assert.equal(second.text, '在地层海报上');
+  assert.match(prompts[1], /Use each required translation below exactly as written/);
+  assert.doesNotMatch(prompts[0], /Contours/);
+});
+
+test('rejects a translation that copies background context the source lacks', async () => {
+  let calls = 0;
+  const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async () => {
+    calls++;
+    return response(calls < 3 ? 'Auf dem Poster von Printed Canyon' : 'Auf dem Strata-Poster');
+  }});
+  const [result] = await provider.translate(request([{id: 'a', source: 'On the Strata poster', context: 'Website text for Printed Canyon.'}], {targetLocale: 'de'}));
+  assert.equal(result.text, 'Auf dem Strata-Poster');
+  assert.equal(calls, 3);
+});
+
+test('retries a translation whose rich-text markers are out of order', async () => {
+  const replies = ['Lee </0>los términos<0>', 'Lee <0>los términos</0>'];
+  const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async () => response(replies.shift())});
+  const [result] = await provider.translate(request([{id: 'a', source: 'Read <0>the terms</0>'}]));
+  assert.equal(result.text, 'Lee <0>los términos</0>');
+});
+
+test('a retry the model server refuses reports an error, not an unsafe translation', async () => {
+  let calls = 0;
+  const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async () =>
+    ++calls === 1 ? response('Hola {nombre}') : {ok: false, status: 503}});
+  const [result] = await provider.translate(request([{id: 'a', source: 'Hello {name}'}]));
+  assert.equal(result.status, 'error');
+  assert.match(result.reason, /HTTP 503/);
 });
