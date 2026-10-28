@@ -444,16 +444,3 @@ test('a discouraged word is retried away when possible and kept when the model i
   assert.equal(numberless.status, 'rejected');
 });
 
-test('an exact-message term is required for the label alone and replaces a label left in English', async () => {
-  const seen = [];
-  const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async (_url, options) => {
-    const prompt = JSON.parse(options.body).messages[0].content;
-    seen.push(prompt);
-    return response(sourceFromPrompt(prompt) === 'Go' ? 'Go' : 'Öffne den Creator');
-  }});
-  const [label, sentence] = await provider.translate({...request([{id: 'go', source: 'Go'}, {id: 'open', source: 'Open the creator'}]), targetLocale: 'de', glossary: {'=Go': 'Los'}});
-  assert.deepEqual(label, {id: 'go', text: 'Los', reviewed: false});
-  assert.deepEqual(sentence, {id: 'open', text: 'Öffne den Creator', reviewed: false});
-  assert.ok(seen.some(prompt => prompt.includes('"Go" translates to "Los"')));
-  assert.ok(seen.every(prompt => !prompt.includes('"=Go"')));
-});

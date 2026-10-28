@@ -236,3 +236,15 @@ test('an exact-message glossary term applies to that whole message only', () => 
   assert.equal(validateTranslation('Go', 'Los', {glossary}), null);
   assert.equal(validateTranslation('Go to the studio', 'Geh ins Studio', {glossary}), null);
 });
+
+test('the engine answers an exact-message term itself and hides exact terms from providers', async () => {
+  const requests = [];
+  const provider = {async translate(request) {
+    requests.push(request);
+    return request.segments.map(segment => ({id: segment.id, text: segment.source === 'Go to the studio' ? 'Geh ins Studio' : 'x'}));
+  }};
+  const engine = createEngine({provider, glossary: {'=Go': 'Los', Studio: 'Studio'}, cacheSize: 0});
+  const results = await engine.translate([{id: 'a', source: 'Go'}, {id: 'b', source: 'Go to the studio'}, {id: 'c', source: ' Go '}], {locale: 'de'});
+  assert.deepEqual(results.map(result => [result.text, result.status]), [['Los', 'translated'], ['Geh ins Studio', 'translated'], [' Los ', 'translated']]);
+  assert.deepEqual(requests.map(request => [request.glossary, request.segments.map(segment => segment.source)]), [[{Studio: 'Studio'}, ['Go to the studio']]]);
+});

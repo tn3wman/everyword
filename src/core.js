@@ -169,6 +169,11 @@ export function replaceTerm(text, term, replacement) {
  * whole message is "Go", so a short label can have its own translation without that word being
  * forced into longer messages ("Open the creator…").
  */
+/** The glossary providers see: exact-message terms are resolved by the engine itself. */
+function providerGlossary(glossary) {
+  return Object.fromEntries(Object.entries(glossary).filter(([term]) => !term.startsWith('=')));
+}
+
 export function termApplies(source, term) {
   return term.startsWith('=') ? source.trim() === term.slice(1) : hasTerm(source, term);
 }
@@ -246,8 +251,12 @@ export function createEngine({sourceLocale = 'en', provider, requireReviewed = f
       const resolved = new Map();
       const pending = new Map();
       for (const p of prepared) {
+        const exact = Object.hasOwn(requestPolicy.glossary, `=${p.source}`) ? requestPolicy.glossary[`=${p.source}`] : undefined;
         if (locale === sourceLocale || !p.source || !/\p{L}/u.test(p.source)) {
           resolved.set(p.key, {text: p.source, status: 'source', reviewed: true});
+        } else if (exact !== undefined) {
+          // An exact-message term is the label's translation; no provider is asked.
+          resolved.set(p.key, {text: exact, status: 'translated', reviewed: false});
         } else if (cache.has(p.key)) {
           const result = cache.get(p.key); cache.delete(p.key); cache.set(p.key, result); resolved.set(p.key, result);
         } else if (!pending.has(p.key)) pending.set(p.key, p);
@@ -259,7 +268,7 @@ export function createEngine({sourceLocale = 'en', provider, requireReviewed = f
         const request = batch.map((p, index) => ({id: `s${offset + index}`, source: p.source, context: p.s.context ?? '', kind: p.s.kind ?? 'text'}));
         let outputs;
         try {
-          outputs = await provider.translate({sourceLocale, targetLocale: locale, segments: request, glossary: requestPolicy.glossary, ...(style ? {style} : {}), ...(avoid.length ? {avoid} : {}), ...(discourage.length ? {discourage} : {}), signal});
+          outputs = await provider.translate({sourceLocale, targetLocale: locale, segments: request, glossary: providerGlossary(requestPolicy.glossary), ...(style ? {style} : {}), ...(avoid.length ? {avoid} : {}), ...(discourage.length ? {discourage} : {}), signal});
           signal?.throwIfAborted();
           if (!Array.isArray(outputs)) throw new TypeError('The provider response must be an array.');
           const outputIds = new Set();

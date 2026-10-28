@@ -1,4 +1,4 @@
-import {balancedMarkers, canonicalLocale, hasTerm, protectedSpans, protectedTokens, replaceTerm, sameNumbers, termApplies} from './core.js';
+import {balancedMarkers, canonicalLocale, hasTerm, protectedSpans, protectedTokens, replaceTerm, sameNumbers} from './core.js';
 
 const DEFAULT_MODEL = 'Hy-MT2-7B-Q8_0';
 const MODEL_REVISION = 'ab8472660ac61fac25f1af43fac2599d52a8a775';
@@ -138,7 +138,7 @@ function validateGlossary(glossary) {
 
 // Only the terms validation will require, so the prompt never asks for an unneeded term.
 function relevantGlossary(glossary, source) {
-  return Object.fromEntries(Object.entries(glossary).filter(([term]) => termApplies(source, term)));
+  return Object.fromEntries(Object.entries(glossary).filter(([term]) => hasTerm(source, term)));
 }
 
 function sameProtectedTokens(source, translation) {
@@ -236,10 +236,7 @@ function parseTranslation(payload, chunk, glossary = {}, sourceLocale) {
   // The model often leaves a product name in English (<1>Ridgeline</1>); put the required term in
   // its place, outside URLs and placeholders, before the checks below see the result.
   for (const [term, replacement] of Object.entries(glossary)) {
-    if (hasTerm(text, replacement, {ignoreCase: true})) continue;
-    // An exact-message term the model left untranslated is the whole label.
-    if (term.startsWith('=')) { if (text.trim() === term.slice(1)) text = replacement; }
-    else if (hasTerm(text, term)) text = replaceTerm(text, term, replacement);
+    if (!hasTerm(text, replacement, {ignoreCase: true}) && hasTerm(text, term)) text = replaceTerm(text, term, replacement);
   }
   return checkTranslation(chunk, text, glossary, sourceLocale);
 }
@@ -328,7 +325,7 @@ function buildPrompt({source, target, chunk, glossary, style}) {
   const terms = Object.entries(glossary);
   if (terms.length) {
     lines.push('Use these required translations when the source terms occur:');
-    for (const [term, replacement] of terms) lines.push(`${JSON.stringify(term.replace(/^=/, ''))} translates to ${JSON.stringify(replacement)}`);
+    for (const [term, replacement] of terms) lines.push(`${JSON.stringify(term)} translates to ${JSON.stringify(replacement)}`);
     lines.push('');
   }
   // A bare instruction here is translated into the output ("Hey du, …"), so it is framed as guidance.
