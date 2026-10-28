@@ -328,3 +328,34 @@ test('keeps an abbreviation expanded in translation', async () => {
   const [result] = await provider.translate({...request([{id: 'faq', source: 'FAQ'}]), targetLocale: 'hi'});
   assert.deepEqual(result, {id: 'faq', text: 'अक्सर पूछे जाने वाले प्रश्न', reviewed: false});
 });
+
+test('translates a passage sentence by sentence when the whole passage keeps dropping a figure', async () => {
+  const source = 'It rises to 4,478 meters (14,692 feet). The north face overlooks Zermatt.';
+  const sources = [];
+  const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async (_url, options) => {
+    const text = sourceFromPrompt(JSON.parse(options.body).messages[0].content);
+    sources.push(text);
+    if (text === source) return response('Er erreicht 4.478 Meter. Die Nordwand blickt auf Zermatt.');
+    return response(text.startsWith('It rises') ? 'Er erreicht 4.478 Meter (14.692 Fuß).' : 'Die Nordwand blickt auf Zermatt.');
+  }});
+  const [result] = await provider.translate({...request([{id: 'peak', source}]), targetLocale: 'de'});
+  assert.deepEqual(result, {id: 'peak', text: 'Er erreicht 4.478 Meter (14.692 Fuß). Die Nordwand blickt auf Zermatt.', reviewed: false});
+  assert.deepEqual(sources.filter(text => text !== source), ['It rises to 4,478 meters (14,692 feet).', 'The north face overlooks Zermatt.']);
+});
+
+test('joins Chinese sentences without the source spaces, and reports a sentence that still fails', async () => {
+  const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async (_url, options) => {
+    const text = sourceFromPrompt(JSON.parse(options.body).messages[0].content);
+    return response({'Founded in 1934. It is large.': '成立。很大。', 'Founded in 1934.': '成立于1934年。', 'It is large.': '它很大。', 'Wait 5 days. Then go.': '等。走。', 'Wait 5 days.': '等几天。', 'Then go.': '然后走。'}[text]);
+  }});
+  const [ok, bad] = await provider.translate({...request([{id: 'park', source: 'Founded in 1934. It is large.'}, {id: 'wait', source: 'Wait 5 days. Then go.'}]), targetLocale: 'zh-CN'});
+  assert.deepEqual(ok, {id: 'park', text: '成立于1934年。它很大。', reviewed: false});
+  assert.equal(bad.status, 'rejected');
+  assert.equal(bad.text, 'Wait 5 days. Then go.');
+});
+
+test('puts the required term in place of a product name the model left in English', async () => {
+  const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async () => response('<0>Ridgeline</0> चुनें।')});
+  const [result] = await provider.translate({...request([{id: 'pick', source: 'Choose <0>Ridgeline</0>.'}]), targetLocale: 'hi', glossary: {Ridgeline: 'पर्वत-रेखाएँ'}});
+  assert.deepEqual(result, {id: 'pick', text: '<0>पर्वत-रेखाएँ</0> चुनें।', reviewed: false});
+});

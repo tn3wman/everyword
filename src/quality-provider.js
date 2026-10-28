@@ -1,4 +1,4 @@
-import {balancedMarkers, canonicalLocale, hasTerm, protectedTokens, sameNumbers, PROTECTED_PATTERN} from './core.js';
+import {balancedMarkers, canonicalLocale, hasTerm, protectedTokens, replaceTerm, sameNumbers, PROTECTED_PATTERN} from './core.js';
 
 const DEFAULT_MODEL = 'Hy-MT2-7B-Q8_0';
 const MODEL_REVISION = 'ab8472660ac61fac25f1af43fac2599d52a8a775';
@@ -146,6 +146,20 @@ function sameProtectedTokens(source, translation) {
   return JSON.stringify(protectedTokens(source)) === JSON.stringify(protectedTokens(translation));
 }
 
+function requestFailure(message) {
+  return Object.assign(new Error(message), {code: 'request-failed'});
+}
+
+// Languages written without spaces between sentences.
+const NO_SPACES = new Set(['zh', 'ja']);
+
+function splitSentences(text, locale) {
+  return [...new Intl.Segmenter(locale, {granularity: 'sentence'}).segment(text)].map(({segment}) => {
+    const trailing = segment.match(/\s*$/u)[0];
+    return {text: segment.slice(0, segment.length - trailing.length), trailing};
+  });
+}
+
 function preservationError(message) {
   return Object.assign(new TypeError(message), {code: 'changed-protected-content'});
 }
@@ -191,7 +205,7 @@ function parseTranslation(payload, chunk, glossary = {}, sourceLocale) {
   if (choice?.finish_reason === 'length') throw preservationError('The local quality model truncated its response. Retry with shorter text.');
   const content = choice?.message?.content;
   if (typeof content !== 'string') throw new TypeError('The local quality model returned no response text.');
-  const text = matchFinalStop(chunk.source, repairPlaceholders(chunk.source, content.trim()));
+  let text = matchFinalStop(chunk.source, repairPlaceholders(chunk.source, content.trim()));
   if (!text) throw new TypeError('The local quality model returned invalid translation text.');
   if (addsText(chunk.source, text)) throw preservationError('The local quality model added text that is not in the source.');
   const contextMarker = /\b(?:[a-z][\w-]*(?:#[\w-]+)?:text|heading=)/u;
@@ -204,6 +218,8 @@ function parseTranslation(payload, chunk, glossary = {}, sourceLocale) {
     throw preservationError('The local quality model changed a numeric value.');
   }
   for (const [term, replacement] of Object.entries(glossary)) {
+    // The model often leaves a product name in English (<1>Ridgeline</1>); put the required term in its place.
+    if (!hasTerm(text, replacement, {ignoreCase: true}) && hasTerm(text, term)) text = replaceTerm(text, term, replacement);
     if (!hasTerm(text, replacement, {ignoreCase: true})) throw preservationError(`The local quality model did not use the required translation of "${term}".`);
   }
   return text;
@@ -321,68 +337,88 @@ export function qualityProvider({baseURL, model = DEFAULT_MODEL, fetch: fetchImp
       glossary = validateGlossary(glossary);
       const translated = new Map();
       const failed = new Map();
+      // One request and its preservation retries, with its own timeout. Throws the first
+      // preservation error when every attempt changes protected content.
+      const translateUnit = async unit => {
+        const requestSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
+        const unitGlossary = relevantGlossary(glossary, unit.source);
+        const attempt = async (prompt, temperature) => {
+          let response;
+          try {
+            response = await fetchImpl(endpoint, {
+              method: 'POST', signal: requestSignal,
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({
+                model, temperature,
+                max_tokens: Math.min(3072, Math.max(256, Math.ceil(unit.source.length * 1.8))),
+                messages: [{role: 'user', content: prompt}],
+              }),
+            });
+          } catch (error) {
+            if (signal?.aborted) throw signal.reason;
+            throw requestFailure(error?.message || 'The local quality model request failed.');
+          }
+          if (!response?.ok) throw requestFailure(`The local quality model returned HTTP ${response?.status ?? 'unknown'}.`);
+          try {
+            return parseTranslation(await response.json(), unit, unitGlossary, sourceLocale);
+          } catch (error) {
+            if (signal?.aborted) throw signal.reason;
+            if (requestSignal.aborted) throw requestFailure(error?.message || 'The local quality model request timed out.');
+            throw error;
+          }
+        };
+        const options = {source, target, chunk: unit, glossary: unitGlossary, style};
+        try {
+          return await attempt(buildPrompt(options), 0);
+        } catch (error) {
+          if (error?.code !== 'changed-protected-content') throw error;
+          // Keep the cache key stable. These requests only repair rejected uncached output; they do
+          // not change prompts for accepted translations already in the cache. A greedy retry
+          // repeats the same mistake word for word, so the last one samples.
+          for (const temperature of RETRY_TEMPERATURES) {
+            try {
+              return await attempt(buildPreservationRetryPrompt(options), temperature);
+            } catch (retryError) {
+              if (retryError?.code === 'request-failed' || signal?.aborted) throw retryError;
+            }
+          }
+          throw error;
+        }
+      };
       const tasks = chunks.map(async chunk => {
         const release = await acquire(signal);
         try {
           signal?.throwIfAborted();
-          const requestSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
-          const chunkGlossary = relevantGlossary(glossary, chunk.source);
-          const requestBody = (prompt, temperature) => JSON.stringify({
-            model, temperature,
-            max_tokens: Math.min(3072, Math.max(256, Math.ceil(chunk.source.length * 1.8))),
-            messages: [{role: 'user', content: prompt}],
-          });
-          const fetchTranslation = (prompt, temperature = 0) => fetchImpl(endpoint, {
-            method: 'POST', signal: requestSignal,
-            headers: {'Content-Type': 'application/json'},
-            body: requestBody(prompt, temperature),
-          });
-          let response;
           try {
-            response = await fetchTranslation(buildPrompt({source, target, chunk, glossary: chunkGlossary, style}));
+            translated.set(chunk.id, await translateUnit(chunk));
+            return;
           } catch (error) {
             if (signal?.aborted) throw signal.reason;
-            failed.set(chunk.id, {status: 'error', reason: error?.message || 'The local quality model request failed.'});
-            return;
-          }
-          if (!response?.ok) {
-            failed.set(chunk.id, {status: 'error', reason: `The local quality model returned HTTP ${response?.status ?? 'unknown'}.`});
-            return;
-          }
-          let payload;
-          try {
-            payload = await response.json();
-            translated.set(chunk.id, parseTranslation(payload, chunk, chunkGlossary, sourceLocale));
-          } catch (error) {
-            if (signal?.aborted) throw signal.reason;
-            if (requestSignal.aborted) {
-              failed.set(chunk.id, {status: 'error', reason: error?.message || 'The local quality model request timed out.'});
-            } else if (error?.code === 'changed-protected-content') {
-              const firstError = error;
-              // Keep the cache key stable. These requests only repair rejected uncached output;
-              // they do not change prompts for accepted translations already in the cache. A greedy
-              // retry repeats the same mistake word for word, so the last one samples.
-              for (const temperature of RETRY_TEMPERATURES) {
-                try {
-                  const retry = await fetchTranslation(buildPreservationRetryPrompt({source, target, chunk, glossary: chunkGlossary, style}), temperature);
-                  if (!retry?.ok) {
-                    failed.set(chunk.id, {status: 'error', reason: `The local quality model returned HTTP ${retry?.status ?? 'unknown'}.`});
-                    return;
-                  }
-                  translated.set(chunk.id, parseTranslation(await retry.json(), chunk, chunkGlossary, sourceLocale));
+            if (error?.code !== 'changed-protected-content') {
+              failed.set(chunk.id, {status: error?.code === 'request-failed' ? 'error' : 'rejected', reason: error?.message || 'The local quality model returned an invalid response.'});
+              return;
+            }
+            // In a long passage the model tends to drop a detail, such as a figure in parentheses;
+            // one sentence at a time it keeps them.
+            const sentences = splitSentences(chunk.source, sourceLocale);
+            if (sentences.length > 1) {
+              try {
+                const parts = [];
+                for (const {text, trailing} of sentences) {
+                  const translation = /\p{L}/u.test(text) ? await translateUnit({...chunk, source: text}) : text;
+                  parts.push(translation + (NO_SPACES.has(new Intl.Locale(target.locale).language) && /^ +$/u.test(trailing) ? '' : trailing));
+                }
+                translated.set(chunk.id, parts.join(''));
+                return;
+              } catch (sentenceError) {
+                if (signal?.aborted) throw signal.reason;
+                if (sentenceError?.code === 'request-failed') {
+                  failed.set(chunk.id, {status: 'error', reason: sentenceError.message});
                   return;
-                } catch (retryError) {
-                  if (signal?.aborted) throw signal.reason;
-                  if (requestSignal.aborted) {
-                    failed.set(chunk.id, {status: 'error', reason: retryError?.message || 'The local quality model request timed out.'});
-                    return;
-                  }
                 }
               }
-              failed.set(chunk.id, {status: 'rejected', reason: firstError.message});
-            } else {
-              failed.set(chunk.id, {status: 'rejected', reason: error?.message || 'The local quality model returned an invalid response.'});
             }
+            failed.set(chunk.id, {status: 'rejected', reason: error.message});
           }
         } finally { release(); }
       });

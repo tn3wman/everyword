@@ -110,7 +110,7 @@ npx everyword catalog --source locales/en.json --locales es,de,fr,zh-CN,hi \
   --output 'locales/{locale}.json' --glossary glossary.json --style style.json
 ```
 
-Each run translates only messages a language's file lacks, keeps the rest, drops keys that left the source, and writes after every batch, so an interrupted run resumes where it stopped. A translation is kept only when its placeholders, numbered rich-text markers (`<0>…</0>`, `<1/>`), digit sequences and glossary terms match the source; the run lists anything it left out and exits with code 2, and the next run retries it. To retranslate a message, delete its entry.
+Each run translates only messages a language's file lacks, keeps the rest, drops keys that left the source, and writes after every batch, so an interrupted run resumes where it stopped. A translation is kept only when its placeholders, numbered rich-text markers (`<0>…</0>`, `<1/>`), digit sequences and glossary terms match the source; the run lists anything it left out (in its report, or as JSON on stdout with `--json`; progress always goes to stderr) and exits with code 2, and the next run retries it. A passage that keeps failing is retried one sentence at a time, and a glossary term the model left in the source language is replaced with its required translation. To retranslate a message, delete its entry.
 
 - `glossary.json` maps terms per language, with `"*"` for every language: `{"*": {"Acme": "Acme"}, "de": {"Ridgeline": "Ridgeline"}}`. Source terms match whole words case-sensitively, so a product named "Contours" leaves the word "contours" free.
 - `style.json` gives each language a short note, such as `{"de": "Address the reader informally with du, never Sie."}`. Hy-MT2 follows register notes reliably.

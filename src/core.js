@@ -11,9 +11,10 @@ export function localeDirection(locale) {
   return info?.direction ?? (/^(ar|fa|he|ur|ps|sd|ug|yi)(-|$)/i.test(language.toString()) ? 'rtl' : 'ltr');
 }
 
-// These tokens are data or interpolation syntax, never natural-language copy.
+// These tokens are data or interpolation syntax, never natural-language copy. A URL ends before
+// trailing punctuation and before CJK punctuation such as the full-width parenthesis in （https://…）.
 // Numbered rich-text markers such as <0>, </0> and <1/> (Lingui, react-intl, i18next Trans).
-export const PROTECTED_PATTERN = /\{\{[^{}]+\}\}|\$\{[^{}]+\}|\{[\w.]+\}|%(?:\d+\$)?[-+#0]*\d*(?:\.\d+)?[sdifuxXoeEgGc]|%(?:\d+\$)?[-+#0]* [-+#0 ]*\d*(?:\.\d+)?[sdifuxXoeEgGc](?![\p{L}\p{N}])|%\([\w]+\)[sdif]|https?:\/\/[^\s<>]+|[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}|<\/?\d+\s*\/?>/gu;
+export const PROTECTED_PATTERN = /\{\{[^{}]+\}\}|\$\{[^{}]+\}|\{[\w.]+\}|%(?:\d+\$)?[-+#0]*\d*(?:\.\d+)?[sdifuxXoeEgGc]|%(?:\d+\$)?[-+#0]* [-+#0 ]*\d*(?:\.\d+)?[sdifuxXoeEgGc](?![\p{L}\p{N}])|%\([\w]+\)[sdif]|https?:\/\/[^\s<>\u3000-\u303f\uff00-\uffef]*[^\s<>.,;:!?)\]}'"\u3000-\u303f\uff00-\uffef]|[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}|<\/?\d+\s*\/?>/gu;
 
 export function protectedTokens(text) {
   return (text.match(PROTECTED_PATTERN) ?? []).sort();
@@ -73,22 +74,33 @@ const NUMBER_WORDS = new Map([
   ...TENS.map((word, index) => [`${word.slice(0, -1)}ieth`, (index + 2) * 10]),
 ]);
 
+function roman(value) {
+  return [['X', 10], ['IX', 9], ['V', 5], ['IV', 4], ['I', 1]].reduce((numeral, [symbol, size]) => {
+    for (; value >= size; value -= size) numeral += symbol;
+    return numeral;
+  }, '');
+}
+
 /**
  * The translation keeps every digit sequence of the source. From an English source (sourceLocale
  * "en" or "en-…"; without one, no allowance applies) it may also write digits for words the source
  * spells out: a month ("April 12" → 4月12日) or a standalone number up to nineteen, a multiple of
  * ten, or their ordinals ("the fifteenth century" → 15世纪). A zero price ("$0") may become a word
- * such as "free".
+ * such as "free", and a century in digits ("17th century") a Roman numeral ("siglo XVII").
  */
 export function sameNumbers(source, text, {sourceLocale} = {}) {
   const extra = numericTokens(text);
   const english = !!sourceLocale && new Intl.Locale(canonicalLocale(sourceLocale)).language === 'en';
   const zeroPrices = !english ? 0 : (source.match(/[$€£¥]0(?![.,]?\d)|(?<!\d[.,]?)0 ?[$€£¥]/gu) ?? []).length;
   let droppedZeros = 0;
+  // Spanish, French and other languages write "the 17th century" as "siglo XVII" or "XVIIe siècle".
+  const romanCenturies = !english ? [] : [...source.matchAll(/\b(\d{1,2})(?:st|nd|rd|th)[\s-]+century\b/giu)].map(match => match[1]);
   for (const token of numericTokens(source)) {
     const index = extra.indexOf(token);
+    const century = romanCenturies.indexOf(token);
     if (index >= 0) extra.splice(index, 1);
     else if (token === '0' && droppedZeros < zeroPrices) droppedZeros++;
+    else if (century >= 0 && new RegExp(`(?<!\\p{L})${roman(Number(token))}(?:e|ème|º)?(?!\\p{L})`, 'u').test(text)) romanCenturies.splice(century, 1);
     else return false;
   }
   const words = english ? [...source.matchAll(/\p{L}+/gu)].map(([word]) => word) : [];
@@ -115,9 +127,16 @@ function sameTokens(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
  */
 // Scripts written without spaces between words: a neighbouring character there never extends a word.
 const WORD = '[[\\p{L}\\p{N}_]--[\\p{sc=Han}\\p{sc=Hiragana}\\p{sc=Katakana}\\p{sc=Thai}\\p{sc=Lao}\\p{sc=Khmer}\\p{sc=Myanmar}\\p{sc=Tibetan}]]';
-export function hasTerm(text, term, {ignoreCase = false} = {}) {
+function termPattern(term, flags) {
   const escaped = term.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
-  return new RegExp(`(?<!${WORD})${escaped}(?!${WORD})`, ignoreCase ? 'iv' : 'v').test(text);
+  return new RegExp(`(?<!${WORD})${escaped}(?!${WORD})`, flags);
+}
+export function hasTerm(text, term, {ignoreCase = false} = {}) {
+  return termPattern(term, ignoreCase ? 'iv' : 'v').test(text);
+}
+/** Replaces whole-word, case-sensitive occurrences of a term. */
+export function replaceTerm(text, term, replacement) {
+  return text.replace(termPattern(term, 'gv'), () => replacement);
 }
 
 export function validateTranslation(source, text, {glossary = {}, preserveNumbers = true, sourceLocale} = {}) {

@@ -128,7 +128,8 @@ try {
     try{
       report=await translateCatalog({source:opts.source,locales:opts.locales.split(',').map(value=>value.trim()),output:locale=>opts.output.replaceAll('{locale}',locale),
         provider,sourceLocale:opts['source-locale']??'en',glossaries,styles,context:opts.context,
-        onProgress:opts.json?undefined:({locale,completed,total,failed})=>console.error(`${locale}: ${completed}/${total} new strings (${failed} failed)`)});
+        // Progress goes to stderr, so --json output on stdout stays parseable during long runs.
+        onProgress:({locale,completed,total,failed})=>console.error(`${locale}: ${completed}/${total} new strings (${failed} failed)`)});
     }finally{cleanup.pop();await provider.close?.();}
     if(opts.json)display(report);
     else for(const {locale,total,reused,translated,failures} of report.locales){

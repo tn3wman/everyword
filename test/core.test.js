@@ -183,3 +183,14 @@ test('a percent sign before a word is not a printf placeholder', () => {
   assert.match(validateTranslation('Count: % d', 'Anzahl: d'), /placeholder|token/i);
   assert.match(validateTranslation('Count: % d', 'Anzahl: % s'), /placeholder|token/i);
 });
+
+test('a century may be written as a Roman numeral, and a URL ends before trailing punctuation', () => {
+  const en = {sourceLocale: 'en'};
+  assert.equal(sameNumbers('dug in the 17th century', 'excavado en el siglo XVII', en), true);
+  assert.equal(sameNumbers("Barcelona's 19th-century extension", 'extension du XIXe siècle de Barcelone', en), true);
+  assert.equal(sameNumbers('dug in the 17th century', 'excavado en el siglo XVIII', en), false);
+  assert.equal(sameNumbers('dug in the 17th century', 'excavado en el siglo XVII', {sourceLocale: 'fr'}), false);
+  assert.deepEqual(protectedTokens('Stripe (https://stripe.com/privacy); Mapbox https://mapbox.com/a.'), ['https://mapbox.com/a', 'https://stripe.com/privacy']);
+  assert.equal(validateTranslation('Read (https://stripe.com/privacy); then go.', 'Lies (https://stripe.com/privacy) und geh.'), null);
+  assert.equal(validateTranslation('Read (https://stripe.com/privacy); then go.', '阅读（https://stripe.com/privacy）；然后走。'), null);
+});
