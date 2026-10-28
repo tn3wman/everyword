@@ -46,6 +46,11 @@ export function avoidFor(styles, locale) {
   const entry = styleEntry(styles, locale);
   return typeof entry === 'string' ? [] : entry.avoid ?? [];
 }
+/** Words to steer away from with a retry, kept when the model insists (German "Sie" for du). */
+export function discourageFor(styles, locale) {
+  const entry = styleEntry(styles, locale);
+  return typeof entry === 'string' ? [] : entry.discourage ?? [];
+}
 
 /**
  * Translate a source-keyed catalog ({"Save": "Save"}, as Lingui and gettext extract it) into one
@@ -72,7 +77,7 @@ export async function translateCatalog({source, locales, output, provider, sourc
   const jobs = await Promise.all(targets.map(async locale => {
     const path = output(locale);
     const glossary = glossaryFor(glossaries, locale);
-    const engine = createEngine({sourceLocale, provider, glossary, style: styleFor(styles, locale), avoid: avoidFor(styles, locale), cacheSize: 0, batchSize: BATCH});
+    const engine = createEngine({sourceLocale, provider, glossary, style: styleFor(styles, locale), avoid: avoidFor(styles, locale), discourage: discourageFor(styles, locale), cacheSize: 0, batchSize: BATCH});
     return {locale, path, glossary, engine, existing: plainCatalog(await readJSON(path, {}), path)};
   }));
   // Locales share the provider, so its concurrency limit stays saturated across batch boundaries.
