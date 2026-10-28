@@ -406,4 +406,8 @@ test('a short label that absorbs its context is retried, then rejected; real sho
   // Accepted; the final-period cleanup separately trims its last dot.
   assert.equal((await translate('For example', 'a phrase', ['z. B.'])).result.status, undefined);
   assert.deepEqual((await translate('Orientation', 'page orientation', ['横向、纵向'], 'zh-CN')).result, {id: 'label', text: '横向、纵向', reviewed: false});
+  assert.deepEqual((await translate('Settings', 'application preferences', ['การตั้งค่า'], 'th')).result, {id: 'label', text: 'การตั้งค่า', reviewed: false});
+  const required = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async () => response('纬度，经度')});
+  const [coordinates] = await required.translate({...request([{id: 'c', source: 'Coordinates', context: 'map coordinate display'}]), targetLocale: 'zh-CN', glossary: {Coordinates: '纬度，经度'}});
+  assert.deepEqual(coordinates, {id: 'c', text: '纬度，经度', reviewed: false});
 });

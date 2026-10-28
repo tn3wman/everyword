@@ -206,14 +206,17 @@ function contextEcho(chunk, text) {
 // absorbed the hint: "Gain" → "海拔上升高度，即总爬升量", "Streams" → "arroyos y riachuelos dibujados en
 // un mapa", "portrait" → "Porträtorichtung, höher als breit". Abbreviations ("z. B.") and list marks
 // ("横向、纵向") stay valid. Heuristic: an unpunctuated explanation of up to four words, or up to eight
-// CJK characters, still passes.
+// Han or kana characters, still passes.
 const CLAUSE_PUNCTUATION = /[,，;；:：]/gu;
-const UNSPACED_SCRIPT = /[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Thai}\p{sc=Lao}\p{sc=Khmer}\p{sc=Myanmar}]/gu;
-function expandsLabel(chunk, text) {
+// Han and kana only: a Thai, Lao, Khmer or Myanmar label counts combining marks as characters.
+const HAN_OR_KANA = /[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}]/gu;
+function expandsLabel(chunk, text, glossary) {
   const source = chunk.source;
   if (!humanContext(chunk.context) || source.trim().split(/\s+/u).length > 2 || !/\p{L}/u.test(source)) return false;
+  // A required glossary translation may bring its own punctuation.
+  for (const replacement of Object.values(glossary)) text = text.split(replacement).join(' ');
   if ((text.match(CLAUSE_PUNCTUATION) ?? []).length > (source.match(CLAUSE_PUNCTUATION) ?? []).length) return true;
-  return text.trim().split(/\s+/u).length > 4 || (text.match(UNSPACED_SCRIPT) ?? []).length > 8;
+  return text.trim().split(/\s+/u).length > 4 || (text.match(HAN_OR_KANA) ?? []).length > 8;
 }
 
 function addsText(source, text) {
@@ -239,7 +242,7 @@ function parseTranslation(payload, chunk, glossary = {}, sourceLocale) {
 
 // Every rule a translation of chunk.source must meet; returns the text or throws.
 function checkTranslation(chunk, text, glossary, sourceLocale) {
-  if (expandsLabel(chunk, text)) throw preservationError('The local quality model turned a short label into a sentence.');
+  if (expandsLabel(chunk, text, glossary)) throw preservationError('The local quality model turned a short label into a sentence.');
   if (addsText(chunk.source, text)) throw preservationError('The local quality model added text that is not in the source.');
   const contextMarker = /\b(?:[a-z][\w-]*(?:#[\w-]+)?:text|heading=)/u;
   if (contextMarker.test(text) && !contextMarker.test(chunk.source)) throw new TypeError('The local quality model echoed internal context.');
