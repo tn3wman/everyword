@@ -1,4 +1,4 @@
-import {balancedMarkers, canonicalLocale, hasTerm, protectedTokens, replaceTerm, sameNumbers, PROTECTED_PATTERN} from './core.js';
+import {balancedMarkers, canonicalLocale, hasTerm, protectedSpans, protectedTokens, replaceTerm, sameNumbers} from './core.js';
 
 const DEFAULT_MODEL = 'Hy-MT2-7B-Q8_0';
 const MODEL_REVISION = 'ab8472660ac61fac25f1af43fac2599d52a8a775';
@@ -67,9 +67,8 @@ function lastBoundary(text, limit) {
 }
 
 function protectBoundary(text, boundary, limit) {
-  for (const match of text.matchAll(PROTECTED_PATTERN)) {
-    const start = match.index;
-    const end = start + match[0].length;
+  for (const {index: start, token} of protectedSpans(text)) {
+    const end = start + token.length;
     if (start < boundary && boundary < end) {
       if (start > 0) return start;
       if (end <= limit) return end;
@@ -155,7 +154,7 @@ const NO_SPACES = new Set(['zh', 'ja']);
 
 // Sentences of text, never split inside a URL, placeholder or marker ("…/foo?x=Hello. Next").
 function splitSentences(text, locale) {
-  const spans = [...text.matchAll(PROTECTED_PATTERN)].map(match => [match.index, match.index + match[0].length]);
+  const spans = protectedSpans(text).map(({index, token}) => [index, index + token.length]);
   const sentences = [];
   for (const {segment, index} of new Intl.Segmenter(locale, {granularity: 'sentence'}).segment(text)) {
     const previous = sentences.at(-1);

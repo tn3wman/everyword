@@ -210,6 +210,8 @@ test('review reproductions: URL parentheses, full-width paths, repeated centurie
   assert.equal(sameNumbers('Add a third layer.', 'Füge eine 3 Schicht hinzu.', en), false);
   assert.ok(validateTranslation('Open https://example.com/search?q=(a(b)) now', 'Öffne https://example.com/search?q=(c(d)) jetzt'));
   assert.equal(validateTranslation('Open https://example.com/search?q=(a(b)) now', 'Öffne https://example.com/search?q=(a(b)) jetzt'), null);
+  assert.equal(validateTranslation('Read (https://en.wikipedia.org/wiki/Paris_(mythology)).', '阅读（https://en.wikipedia.org/wiki/Paris_(mythology)）。'), null);
+  assert.deepEqual(protectedTokens('Read (https://en.wikipedia.org/wiki/Paris_(mythology)).'), ['https://en.wikipedia.org/wiki/Paris_(mythology)']);
 });
 
 test('a glossary term is replaced outside URLs and placeholders only', () => {

@@ -11,14 +11,33 @@ export function localeDirection(locale) {
   return info?.direction ?? (/^(ar|fa|he|ur|ps|sd|ug|yi)(-|$)/i.test(language.toString()) ? 'rtl' : 'ltr');
 }
 
-// These tokens are data or interpolation syntax, never natural-language copy. A URL ends before
-// trailing punctuation and CJK punctuation such as the full-width parenthesis in （https://…）; it
-// ends with ")" only when it opened one itself (wiki/Paris_(mythology), ?q=(a(b))).
+// These tokens are data or interpolation syntax, never natural-language copy.
 // Numbered rich-text markers such as <0>, </0> and <1/> (Lingui, react-intl, i18next Trans).
-export const PROTECTED_PATTERN = /\{\{[^{}]+\}\}|\$\{[^{}]+\}|\{[\w.]+\}|%(?:\d+\$)?[-+#0]*\d*(?:\.\d+)?[sdifuxXoeEgGc]|%(?:\d+\$)?[-+#0]* [-+#0 ]*\d*(?:\.\d+)?[sdifuxXoeEgGc](?![\p{L}\p{N}])|%\([\w]+\)[sdif]|https?:\/\/[^\s<>\u3000-\u303f\uff01-\uff0f\uff1a-\uff20\uff3b-\uff40\uff5b-\uff65]*(?:[^\s<>.,;:!?'")\]}\u3000-\u303f\uff01-\uff0f\uff1a-\uff20\uff3b-\uff40\uff5b-\uff65]|(?<=:\/\/[^\s<>]*\([^\s<>]*)\))|[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}|<\/?\d+\s*\/?>/gu;
+// A URL stops at whitespace and CJK punctuation such as the full-width parenthesis in （https://…）.
+const PROTECTED_PATTERN = /\{\{[^{}]+\}\}|\$\{[^{}]+\}|\{[\w.]+\}|%(?:\d+\$)?[-+#0]*\d*(?:\.\d+)?[sdifuxXoeEgGc]|%(?:\d+\$)?[-+#0]* [-+#0 ]*\d*(?:\.\d+)?[sdifuxXoeEgGc](?![\p{L}\p{N}])|%\([\w]+\)[sdif]|https?:\/\/[^\s<>\u3000-\u303f\uff01-\uff0f\uff1a-\uff20\uff3b-\uff40\uff5b-\uff65]+|[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}|<\/?\d+\s*\/?>/gu;
+
+// A URL ends before trailing punctuation, and before a ")" it did not open itself, so
+// "(https://x.org/a)." gives https://x.org/a while wiki/Paris_(mythology) and ?q=(a(b)) stay whole.
+function urlEnd(url) {
+  let end = url.length;
+  for (;;) {
+    const last = url[end - 1];
+    if (/[.,;:!?'"\]}]/u.test(last)) end--;
+    else if (last === ')' && url.slice(0, end).split(')').length > url.slice(0, end).split('(').length) end--;
+    else return end;
+  }
+}
+
+/** Protected spans in order: {index, token}. */
+export function protectedSpans(text) {
+  return [...text.matchAll(PROTECTED_PATTERN)].map(match => ({
+    index: match.index,
+    token: /^https?:/u.test(match[0]) ? match[0].slice(0, urlEnd(match[0])) : match[0],
+  }));
+}
 
 export function protectedTokens(text) {
-  return (text.match(PROTECTED_PATTERN) ?? []).sort();
+  return protectedSpans(text).map(span => span.token).sort();
 }
 
 /** Numbered markers must close in order, so a translation cannot interleave or orphan them. */
@@ -148,9 +167,9 @@ export function hasTerm(text, term, {ignoreCase = false} = {}) {
 export function replaceTerm(text, term, replacement) {
   const pattern = termPattern(term, 'gv');
   let result = '', offset = 0;
-  for (const match of text.matchAll(PROTECTED_PATTERN)) {
-    result += text.slice(offset, match.index).replace(pattern, () => replacement) + match[0];
-    offset = match.index + match[0].length;
+  for (const {index, token} of protectedSpans(text)) {
+    result += text.slice(offset, index).replace(pattern, () => replacement) + token;
+    offset = index + token.length;
   }
   return result + text.slice(offset).replace(pattern, () => replacement);
 }
