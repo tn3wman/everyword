@@ -184,23 +184,23 @@ test('a percent sign before a word is not a printf placeholder', () => {
   assert.match(validateTranslation('Count: % d', 'Anzahl: % s'), /placeholder|token/i);
 });
 
-test('a century may be written as a Roman numeral, and a URL ends before trailing punctuation', () => {
+test('a century may be written as a Roman numeral, and a URL keeps its attached punctuation', () => {
   const en = {sourceLocale: 'en'};
   assert.equal(sameNumbers('dug in the 17th century', 'excavado en el siglo XVII', en), true);
   assert.equal(sameNumbers("Barcelona's 19th-century extension", 'extension du XIXe siècle de Barcelone', en), true);
   assert.equal(sameNumbers('dug in the 17th century', 'excavado en el siglo XVIII', en), false);
   assert.equal(sameNumbers('dug in the 17th century', 'excavado en el siglo XVII', {sourceLocale: 'fr'}), false);
-  assert.deepEqual(protectedTokens('Stripe (https://stripe.com/privacy); Mapbox https://mapbox.com/a.'), ['https://mapbox.com/a', 'https://stripe.com/privacy']);
-  assert.equal(validateTranslation('Read (https://stripe.com/privacy); then go.', 'Lies (https://stripe.com/privacy) und geh.'), null);
-  // A URL runs to whitespace: CJK text glued to it is part of the token, which fails safe.
-  assert.equal(validateTranslation('Read (https://stripe.com/privacy);', '阅读（https://stripe.com/privacy）；'), null);
+  // A URL keeps the punctuation attached to it, so moving that punctuation fails safe.
+  assert.deepEqual(protectedTokens('Stripe (https://stripe.com/privacy); Mapbox https://mapbox.com/a'), ['https://mapbox.com/a', 'https://stripe.com/privacy);']);
+  assert.equal(validateTranslation('Read https://stripe.com/privacy then go.', 'Lies https://stripe.com/privacy und geh.'), null);
+  assert.ok(validateTranslation('Read (https://stripe.com/privacy); then go.', 'Lies (https://stripe.com/privacy) und geh.'));
   assert.ok(validateTranslation('Read (https://stripe.com/privacy); then go.', '阅读（https://stripe.com/privacy）；然后走。'));
 });
 
 test('review reproductions: URL parentheses, full-width paths, repeated centuries and fractions', () => {
   const en = {sourceLocale: 'en'};
   assert.ok(validateTranslation('See https://en.wikipedia.org/wiki/Paris_(mythology)', 'Voir https://en.wikipedia.org/wiki/Paris_(mythology'));
-  assert.equal(validateTranslation('See https://en.wikipedia.org/wiki/Paris_(mythology).', 'Voir https://en.wikipedia.org/wiki/Paris_(mythology).'), null);
+  assert.equal(validateTranslation('See https://en.wikipedia.org/wiki/Paris_(mythology) now', 'Voir https://en.wikipedia.org/wiki/Paris_(mythology) maintenant'), null);
   assert.ok(validateTranslation('Open https://example.com/ＡＢＣ now', 'Öffne https://example.com/ＤＥＦ jetzt'));
   assert.equal(sameNumbers('The 17th century followed the 17th century.', 'El siglo XVII.', en), false);
   assert.equal(sameNumbers('The 17th century followed the 17th century.', 'El siglo XVII siguió al siglo XVII.', en), true);
@@ -212,8 +212,6 @@ test('review reproductions: URL parentheses, full-width paths, repeated centurie
   assert.equal(sameNumbers('Add a third layer.', 'Füge eine 3 Schicht hinzu.', en), false);
   assert.ok(validateTranslation('Open https://example.com/search?q=(a(b)) now', 'Öffne https://example.com/search?q=(c(d)) jetzt'));
   assert.equal(validateTranslation('Open https://example.com/search?q=(a(b)) now', 'Öffne https://example.com/search?q=(a(b)) jetzt'), null);
-  assert.equal(validateTranslation('Read (https://en.wikipedia.org/wiki/Paris_(mythology)).', '阅读（https://en.wikipedia.org/wiki/Paris_(mythology)）。'), null);
-  assert.deepEqual(protectedTokens('Read (https://en.wikipedia.org/wiki/Paris_(mythology)).'), ['https://en.wikipedia.org/wiki/Paris_(mythology)']);
 });
 
 test('a glossary term is replaced outside URLs and placeholders only', () => {
@@ -221,10 +219,12 @@ test('a glossary term is replaced outside URLs and placeholders only', () => {
   assert.equal(replaceTerm('{Ridgeline} and Ridgeline', 'Ridgeline', 'X'), '{Ridgeline} and X');
 });
 
-test('a URL change hidden behind full-width punctuation, an uppercase scheme or quotation marks is caught', () => {
+test('a URL change hidden behind full-width punctuation, a tab or an uppercase scheme is caught', () => {
   assert.ok(validateTranslation('Open https://trusted.example now', 'Öffne https://trusted.example／@evil.example jetzt'));
   assert.ok(validateTranslation('Open HTTPS://example.com now', 'Öffne HTTPS://evil.example jetzt'));
   assert.equal(validateTranslation('Open HTTPS://example.com now', 'Öffne HTTPS://example.com jetzt'), null);
   assert.equal(replaceTerm('https://example.com/a。Ridgeline', 'Ridgeline', 'Kammlinie'), 'https://example.com/a。Ridgeline');
-  assert.equal(validateTranslation('Read “https://example.com/a”.', 'Lies „https://example.com/a“.'), null);
+  assert.ok(validateTranslation('Open https://trusted.example now', 'Öffne https://trusted.example\t@evil.example jetzt'));
+  assert.ok(validateTranslation('Open https://example.com/時々 now', 'Öffne https://example.com/時 jetzt'));
+  assert.ok(validateTranslation('Open https://example.com/path now', 'Öffne https://example.com/path／ jetzt'));
 });
