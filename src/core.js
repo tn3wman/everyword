@@ -11,10 +11,11 @@ export function localeDirection(locale) {
   return info?.direction ?? (/^(ar|fa|he|ur|ps|sd|ug|yi)(-|$)/i.test(language.toString()) ? 'rtl' : 'ltr');
 }
 
-// These tokens are data or interpolation syntax, never natural-language copy. A URL ends before
-// trailing punctuation and before CJK punctuation such as the full-width parenthesis in （https://…）.
+// These tokens are data or interpolation syntax, never natural-language copy. A URL keeps balanced
+// parentheses (wiki/Paris_(mythology)) but ends before trailing punctuation, an unbalanced ")" and
+// CJK punctuation such as the full-width parenthesis in （https://…）.
 // Numbered rich-text markers such as <0>, </0> and <1/> (Lingui, react-intl, i18next Trans).
-export const PROTECTED_PATTERN = /\{\{[^{}]+\}\}|\$\{[^{}]+\}|\{[\w.]+\}|%(?:\d+\$)?[-+#0]*\d*(?:\.\d+)?[sdifuxXoeEgGc]|%(?:\d+\$)?[-+#0]* [-+#0 ]*\d*(?:\.\d+)?[sdifuxXoeEgGc](?![\p{L}\p{N}])|%\([\w]+\)[sdif]|https?:\/\/[^\s<>\u3000-\u303f\uff00-\uffef]*[^\s<>.,;:!?)\]}'"\u3000-\u303f\uff00-\uffef]|[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}|<\/?\d+\s*\/?>/gu;
+export const PROTECTED_PATTERN = /\{\{[^{}]+\}\}|\$\{[^{}]+\}|\{[\w.]+\}|%(?:\d+\$)?[-+#0]*\d*(?:\.\d+)?[sdifuxXoeEgGc]|%(?:\d+\$)?[-+#0]* [-+#0 ]*\d*(?:\.\d+)?[sdifuxXoeEgGc](?![\p{L}\p{N}])|%\([\w]+\)[sdif]|https?:\/\/(?:[^\s<>()\u3000-\u303f\uff01-\uff0f\uff1a-\uff20\uff3b-\uff40\uff5b-\uff65]|\([^\s<>()]*\))*(?:[^\s<>().,;:!?'"\]}\u3000-\u303f\uff01-\uff0f\uff1a-\uff20\uff3b-\uff40\uff5b-\uff65]|\([^\s<>()]*\))|[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}|<\/?\d+\s*\/?>/gu;
 
 export function protectedTokens(text) {
   return (text.match(PROTECTED_PATTERN) ?? []).sort();
@@ -64,7 +65,8 @@ const MONTHS = ['january','february','march','april','may','june','july','august
 const UNITS = ['zero','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen'];
 const UNIT_ORDINALS = ['zeroth','first','second','third','fourth','fifth','sixth','seventh','eighth','ninth','tenth','eleventh','twelfth','thirteenth','fourteenth','fifteenth','sixteenth','seventeenth','eighteenth','nineteenth'];
 // Words that combine with a number word into a larger or fractional number.
-const NUMBER_PARTS = new Set(['hundred', 'thousand', 'million', 'billion', 'trillion', 'dozen', 'hundredth', 'thousandth', 'millionth', 'and', 'point', 'dot', 'oh', 'minus', 'negative', 'plus', 'times', 'over', 'half', 'halves', 'quarter', 'quarters', 'thirds']);
+// "a"/"an" and plural ordinals make fractions: "one and a third", "three fifths".
+const NUMBER_PARTS = new Set(['hundred', 'thousand', 'million', 'billion', 'trillion', 'dozen', 'hundredth', 'thousandth', 'millionth', 'and', 'point', 'dot', 'oh', 'minus', 'negative', 'plus', 'times', 'over', 'half', 'halves', 'quarter', 'quarters', 'a', 'an']);
 const TENS = ['twenty','thirty','forty','fifty','sixty','seventy','eighty','ninety'];
 // English number words and the digits a translation may write for them ("fourteen peaks" → 14座山峰).
 const NUMBER_WORDS = new Map([
@@ -73,6 +75,8 @@ const NUMBER_WORDS = new Map([
   ...TENS.map((word, index) => [word, (index + 2) * 10]),
   ...TENS.map((word, index) => [`${word.slice(0, -1)}ieth`, (index + 2) * 10]),
 ]);
+// "Seconds" is a unit of time, not a fraction.
+for (const word of [...UNIT_ORDINALS, ...TENS.map(word => `${word.slice(0, -1)}ieth`)]) if (word !== 'second') NUMBER_PARTS.add(`${word}s`);
 
 function roman(value) {
   return [['X', 10], ['IX', 9], ['V', 5], ['IV', 4], ['I', 1]].reduce((numeral, [symbol, size]) => {
@@ -95,12 +99,16 @@ export function sameNumbers(source, text, {sourceLocale} = {}) {
   let droppedZeros = 0;
   // Spanish, French and other languages write "the 17th century" as "siglo XVII" or "XVIIe siècle".
   const romanCenturies = !english ? [] : [...source.matchAll(/\b(\d{1,2})(?:st|nd|rd|th)[\s-]+century\b/giu)].map(match => match[1]);
+  const romans = text.match(/(?<!\p{L})[IVX]+(?=(?:e|ème|º)?(?!\p{L}))/gu) ?? [];
   for (const token of numericTokens(source)) {
     const index = extra.indexOf(token);
     const century = romanCenturies.indexOf(token);
     if (index >= 0) extra.splice(index, 1);
     else if (token === '0' && droppedZeros < zeroPrices) droppedZeros++;
-    else if (century >= 0 && new RegExp(`(?<!\\p{L})${roman(Number(token))}(?:e|ème|º)?(?!\\p{L})`, 'u').test(text)) romanCenturies.splice(century, 1);
+    else if (century >= 0 && romans.includes(roman(Number(token)))) {
+      romanCenturies.splice(century, 1);
+      romans.splice(romans.indexOf(roman(Number(token))), 1);
+    }
     else return false;
   }
   const words = english ? [...source.matchAll(/\p{L}+/gu)].map(([word]) => word) : [];
@@ -134,9 +142,15 @@ function termPattern(term, flags) {
 export function hasTerm(text, term, {ignoreCase = false} = {}) {
   return termPattern(term, ignoreCase ? 'iv' : 'v').test(text);
 }
-/** Replaces whole-word, case-sensitive occurrences of a term. */
+/** Replaces whole-word, case-sensitive occurrences of a term outside placeholders, URLs and markers. */
 export function replaceTerm(text, term, replacement) {
-  return text.replace(termPattern(term, 'gv'), () => replacement);
+  const pattern = termPattern(term, 'gv');
+  let result = '', offset = 0;
+  for (const match of text.matchAll(PROTECTED_PATTERN)) {
+    result += text.slice(offset, match.index).replace(pattern, () => replacement) + match[0];
+    offset = match.index + match[0].length;
+  }
+  return result + text.slice(offset).replace(pattern, () => replacement);
 }
 
 export function validateTranslation(source, text, {glossary = {}, preserveNumbers = true, sourceLocale} = {}) {

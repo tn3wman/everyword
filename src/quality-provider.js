@@ -153,8 +153,16 @@ function requestFailure(message) {
 // Languages written without spaces between sentences.
 const NO_SPACES = new Set(['zh', 'ja']);
 
+// Sentences of text, never split inside a URL, placeholder or marker ("…/foo?x=Hello. Next").
 function splitSentences(text, locale) {
-  return [...new Intl.Segmenter(locale, {granularity: 'sentence'}).segment(text)].map(({segment}) => {
+  const spans = [...text.matchAll(PROTECTED_PATTERN)].map(match => [match.index, match.index + match[0].length]);
+  const sentences = [];
+  for (const {segment, index} of new Intl.Segmenter(locale, {granularity: 'sentence'}).segment(text)) {
+    const previous = sentences.at(-1);
+    if (previous && spans.some(([start, end]) => start < index && index < end)) previous.segment += segment;
+    else sentences.push({segment});
+  }
+  return sentences.map(({segment}) => {
     const trailing = segment.match(/\s*$/u)[0];
     return {text: segment.slice(0, segment.length - trailing.length), trailing};
   });
@@ -207,6 +215,16 @@ function parseTranslation(payload, chunk, glossary = {}, sourceLocale) {
   if (typeof content !== 'string') throw new TypeError('The local quality model returned no response text.');
   let text = matchFinalStop(chunk.source, repairPlaceholders(chunk.source, content.trim()));
   if (!text) throw new TypeError('The local quality model returned invalid translation text.');
+  // The model often leaves a product name in English (<1>Ridgeline</1>); put the required term in
+  // its place, outside URLs and placeholders, before the checks below see the result.
+  for (const [term, replacement] of Object.entries(glossary)) {
+    if (!hasTerm(text, replacement, {ignoreCase: true}) && hasTerm(text, term)) text = replaceTerm(text, term, replacement);
+  }
+  return checkTranslation(chunk, text, glossary, sourceLocale);
+}
+
+// Every rule a translation of chunk.source must meet; returns the text or throws.
+function checkTranslation(chunk, text, glossary, sourceLocale) {
   if (addsText(chunk.source, text)) throw preservationError('The local quality model added text that is not in the source.');
   const contextMarker = /\b(?:[a-z][\w-]*(?:#[\w-]+)?:text|heading=)/u;
   if (contextMarker.test(text) && !contextMarker.test(chunk.source)) throw new TypeError('The local quality model echoed internal context.');
@@ -218,8 +236,6 @@ function parseTranslation(payload, chunk, glossary = {}, sourceLocale) {
     throw preservationError('The local quality model changed a numeric value.');
   }
   for (const [term, replacement] of Object.entries(glossary)) {
-    // The model often leaves a product name in English (<1>Ridgeline</1>); put the required term in its place.
-    if (!hasTerm(text, replacement, {ignoreCase: true}) && hasTerm(text, term)) text = replaceTerm(text, term, replacement);
     if (!hasTerm(text, replacement, {ignoreCase: true})) throw preservationError(`The local quality model did not use the required translation of "${term}".`);
   }
   return text;
@@ -408,7 +424,7 @@ export function qualityProvider({baseURL, model = DEFAULT_MODEL, fetch: fetchImp
                   const translation = /\p{L}/u.test(text) ? await translateUnit({...chunk, source: text}) : text;
                   parts.push(translation + (NO_SPACES.has(new Intl.Locale(target.locale).language) && /^ +$/u.test(trailing) ? '' : trailing));
                 }
-                translated.set(chunk.id, parts.join(''));
+                translated.set(chunk.id, checkTranslation(chunk, parts.join(''), relevantGlossary(glossary, chunk.source), sourceLocale));
                 return;
               } catch (sentenceError) {
                 if (signal?.aborted) throw signal.reason;

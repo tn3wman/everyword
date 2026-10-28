@@ -359,3 +359,23 @@ test('puts the required term in place of a product name the model left in Englis
   const [result] = await provider.translate({...request([{id: 'pick', source: 'Choose <0>Ridgeline</0>.'}]), targetLocale: 'hi', glossary: {Ridgeline: 'पर्वत-रेखाएँ'}});
   assert.deepEqual(result, {id: 'pick', text: '<0>पर्वत-रेखाएँ</0> चुनें।', reviewed: false});
 });
+
+test('sentence fallback never splits a URL and validates the joined passage', async () => {
+  const source = 'Read https://example.com/foo?x=Hello. Wait 5 days.';
+  const sources = [];
+  const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async (_url, options) => {
+    const text = sourceFromPrompt(JSON.parse(options.body).messages[0].content);
+    sources.push(text);
+    if (text === source) return response('Lies https://example.com/foo?x=Hello. Warte Tage.');
+    return response({'Read https://example.com/foo?x=Hello.': 'Lies https://example.com/foo?x=Hello.', 'Wait 5 days.': 'Warte 5 Tage.'}[text]);
+  }});
+  const [result] = await provider.translate({...request([{id: 'url', source}]), targetLocale: 'de'});
+  assert.deepEqual(result, {id: 'url', text: 'Lies https://example.com/foo?x=Hello. Warte 5 Tage.', reviewed: false});
+  assert.ok(!sources.includes('x=Hello.'));
+});
+
+test('term enforcement leaves a URL that contains the term intact', async () => {
+  const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async () => response('Wähle Ridgeline unter https://example.com/Ridgeline.')});
+  const [result] = await provider.translate({...request([{id: 'pick', source: 'Choose Ridgeline at https://example.com/Ridgeline.'}]), targetLocale: 'de', glossary: {Ridgeline: 'Kammlinie'}});
+  assert.deepEqual(result, {id: 'pick', text: 'Wähle Kammlinie unter https://example.com/Ridgeline.', reviewed: false});
+});

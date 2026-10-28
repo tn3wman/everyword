@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createEngine,validateTranslation,localeDirection,protectedTokens,sameNumbers} from '../src/core.js';
+import {createEngine,validateTranslation,localeDirection,protectedTokens,replaceTerm,sameNumbers} from '../src/core.js';
 import {catalogProvider,modelProvider,httpProvider,fallbackProvider} from '../src/providers.js';
 const seg = (source,context='screen',id='a') => ({id,source,context});
 
@@ -193,4 +193,22 @@ test('a century may be written as a Roman numeral, and a URL ends before trailin
   assert.deepEqual(protectedTokens('Stripe (https://stripe.com/privacy); Mapbox https://mapbox.com/a.'), ['https://mapbox.com/a', 'https://stripe.com/privacy']);
   assert.equal(validateTranslation('Read (https://stripe.com/privacy); then go.', 'Lies (https://stripe.com/privacy) und geh.'), null);
   assert.equal(validateTranslation('Read (https://stripe.com/privacy); then go.', '阅读（https://stripe.com/privacy）；然后走。'), null);
+});
+
+test('review reproductions: URL parentheses, full-width paths, repeated centuries and fractions', () => {
+  const en = {sourceLocale: 'en'};
+  assert.ok(validateTranslation('See https://en.wikipedia.org/wiki/Paris_(mythology)', 'Voir https://en.wikipedia.org/wiki/Paris_(mythology'));
+  assert.equal(validateTranslation('See https://en.wikipedia.org/wiki/Paris_(mythology).', 'Voir https://en.wikipedia.org/wiki/Paris_(mythology).'), null);
+  assert.ok(validateTranslation('Open https://example.com/ＡＢＣ now', 'Öffne https://example.com/ＤＥＦ jetzt'));
+  assert.equal(sameNumbers('The 17th century followed the 17th century.', 'El siglo XVII.', en), false);
+  assert.equal(sameNumbers('The 17th century followed the 17th century.', 'El siglo XVII siguió al siglo XVII.', en), true);
+  assert.equal(sameNumbers('Wait one and a third days.', 'Warte 3 Tage.', en), false);
+  assert.equal(sameNumbers('two and a fifth', '5', en), false);
+  assert.equal(sameNumbers('three fifths of the area', '3 der Fläche', en), false);
+  assert.equal(sameNumbers('Wait five seconds.', 'Warte 5 Sekunden.', en), true);
+});
+
+test('a glossary term is replaced outside URLs and placeholders only', () => {
+  assert.equal(replaceTerm('Wähle Ridgeline unter https://example.com/Ridgeline.', 'Ridgeline', 'Kammlinie'), 'Wähle Kammlinie unter https://example.com/Ridgeline.');
+  assert.equal(replaceTerm('{Ridgeline} and Ridgeline', 'Ridgeline', 'X'), '{Ridgeline} and X');
 });
