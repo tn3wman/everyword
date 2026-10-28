@@ -248,3 +248,13 @@ test('the engine answers an exact-message term itself and hides exact terms from
   assert.deepEqual(results.map(result => [result.text, result.status]), [['Los', 'translated'], ['Geh ins Studio', 'translated'], [' Los ', 'translated']]);
   assert.deepEqual(requests.map(request => [request.glossary, request.segments.map(segment => segment.source)]), [[{Studio: 'Studio'}, ['Go to the studio']]]);
 });
+
+test('an exact-message term is validated and respects the review gate', async () => {
+  const provider = {async translate() { throw new Error('not called'); }};
+  const strict = createEngine({provider, glossary: {'=Go': 'Los'}, requireReviewed: true, cacheSize: 0});
+  const [review] = await strict.translate([{id: 'a', source: 'Go'}], {locale: 'de'});
+  assert.deepEqual([review.text, review.status, review.candidate], ['Go', 'needs-review', 'Los']);
+  const loose = createEngine({provider, glossary: {'=Hello {name}': 'Hallo'}, cacheSize: 0});
+  const [rejected] = await loose.translate([{id: 'b', source: 'Hello {name}'}], {locale: 'de'});
+  assert.deepEqual([rejected.text, rejected.status], ['Hello {name}', 'rejected']);
+});

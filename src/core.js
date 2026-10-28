@@ -255,8 +255,12 @@ export function createEngine({sourceLocale = 'en', provider, requireReviewed = f
         if (locale === sourceLocale || !p.source || !/\p{L}/u.test(p.source)) {
           resolved.set(p.key, {text: p.source, status: 'source', reviewed: true});
         } else if (exact !== undefined) {
-          // An exact-message term is the label's translation; no provider is asked.
-          resolved.set(p.key, {text: exact, status: 'translated', reviewed: false});
+          // An exact-message term is the label's translation; no provider is asked. It passes the
+          // same validation and review gate as a provider's output.
+          const reason = validateTranslation(p.source, exact, {...requestPolicy, sourceLocale, avoid});
+          if (reason) resolved.set(p.key, {text: p.source, status: 'rejected', reviewed: false, reason});
+          else if (requestPolicy.requireReviewed) resolved.set(p.key, {text: p.source, status: 'needs-review', reviewed: false, candidate: exact, reason: 'Approve this translation before displaying it.'});
+          else resolved.set(p.key, {text: exact, status: 'translated', reviewed: false});
         } else if (cache.has(p.key)) {
           const result = cache.get(p.key); cache.delete(p.key); cache.set(p.key, result); resolved.set(p.key, result);
         } else if (!pending.has(p.key)) pending.set(p.key, p);
