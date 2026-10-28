@@ -443,3 +443,4 @@ test('a discouraged word is retried away when possible and kept when the model i
   const [numberless] = await broken.translate({...request([{id: 'n', source: 'Enter 3 dates.'}]), targetLocale: 'de', discourage: ['Sie']});
   assert.equal(numberless.status, 'rejected');
 });
+

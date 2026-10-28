@@ -164,6 +164,20 @@ export function replaceTerm(text, term, replacement) {
   return result + text.slice(offset).replace(pattern, () => replacement);
 }
 
+/**
+ * Whether a glossary term applies to a source message. A term written "=Go" applies only when the
+ * whole message is "Go", so a short label can have its own translation without that word being
+ * forced into longer messages ("Open the creator…").
+ */
+/** The glossary providers see: exact-message terms are resolved by the engine itself. */
+function providerGlossary(glossary) {
+  return Object.fromEntries(Object.entries(glossary).filter(([term]) => !term.startsWith('=')));
+}
+
+export function termApplies(source, term) {
+  return term.startsWith('=') ? source.trim() === term.slice(1) : hasTerm(source, term);
+}
+
 export function validateTranslation(source, text, {glossary = {}, preserveNumbers = true, sourceLocale, avoid = []} = {}) {
   if (typeof text !== 'string' || !text.trim()) return 'The provider returned empty or invalid text.';
   // Whole-word and case-sensitive: German "Sie" (you, formal) but not "sie" (she, they).
@@ -176,7 +190,7 @@ export function validateTranslation(source, text, {glossary = {}, preserveNumber
   if (!balancedMarkers(text)) return 'The translation misplaced a numbered rich-text marker.';
   if (preserveNumbers && !sameNumbers(source, text, {sourceLocale})) return 'The translation changed a numeric value.';
   for (const [term, replacement] of Object.entries(glossary)) {
-    if (hasTerm(source, term) && !hasTerm(text, replacement, {ignoreCase: true})) return `The translation did not preserve the glossary term "${term}".`;
+    if (termApplies(source, term) && !hasTerm(text, replacement, {ignoreCase: true})) return `The translation did not preserve the glossary term "${term}".`;
   }
   return null;
 }
@@ -237,8 +251,16 @@ export function createEngine({sourceLocale = 'en', provider, requireReviewed = f
       const resolved = new Map();
       const pending = new Map();
       for (const p of prepared) {
+        const exact = Object.hasOwn(requestPolicy.glossary, `=${p.source}`) ? requestPolicy.glossary[`=${p.source}`] : undefined;
         if (locale === sourceLocale || !p.source || !/\p{L}/u.test(p.source)) {
           resolved.set(p.key, {text: p.source, status: 'source', reviewed: true});
+        } else if (exact !== undefined) {
+          // An exact-message term is the label's translation; no provider is asked. It passes the
+          // same validation and review gate as a provider's output.
+          const reason = validateTranslation(p.source, exact, {...requestPolicy, sourceLocale, avoid});
+          if (reason) resolved.set(p.key, {text: p.source, status: 'rejected', reviewed: false, reason});
+          else if (requestPolicy.requireReviewed) resolved.set(p.key, {text: p.source, status: 'needs-review', reviewed: false, candidate: exact, reason: 'Approve this translation before displaying it.'});
+          else resolved.set(p.key, {text: exact, status: 'translated', reviewed: false});
         } else if (cache.has(p.key)) {
           const result = cache.get(p.key); cache.delete(p.key); cache.set(p.key, result); resolved.set(p.key, result);
         } else if (!pending.has(p.key)) pending.set(p.key, p);
@@ -250,7 +272,7 @@ export function createEngine({sourceLocale = 'en', provider, requireReviewed = f
         const request = batch.map((p, index) => ({id: `s${offset + index}`, source: p.source, context: p.s.context ?? '', kind: p.s.kind ?? 'text'}));
         let outputs;
         try {
-          outputs = await provider.translate({sourceLocale, targetLocale: locale, segments: request, glossary: requestPolicy.glossary, ...(style ? {style} : {}), ...(avoid.length ? {avoid} : {}), ...(discourage.length ? {discourage} : {}), signal});
+          outputs = await provider.translate({sourceLocale, targetLocale: locale, segments: request, glossary: providerGlossary(requestPolicy.glossary), ...(style ? {style} : {}), ...(avoid.length ? {avoid} : {}), ...(discourage.length ? {discourage} : {}), signal});
           signal?.throwIfAborted();
           if (!Array.isArray(outputs)) throw new TypeError('The provider response must be an array.');
           const outputIds = new Set();

@@ -229,3 +229,32 @@ test('a URL change hidden behind full-width punctuation, a tab or an uppercase s
   assert.ok(validateTranslation('Open https://example.com/時々 now', 'Öffne https://example.com/時 jetzt'));
   assert.ok(validateTranslation('Open https://example.com/path now', 'Öffne https://example.com/path／ jetzt'));
 });
+
+test('an exact-message glossary term applies to that whole message only', () => {
+  const glossary = {'=Go': 'Los'};
+  assert.match(validateTranslation('Go', 'Gehen', {glossary}), /glossary term "=Go"/);
+  assert.equal(validateTranslation('Go', 'Los', {glossary}), null);
+  assert.equal(validateTranslation('Go to the studio', 'Geh ins Studio', {glossary}), null);
+});
+
+test('the engine answers an exact-message term itself and hides exact terms from providers', async () => {
+  const requests = [];
+  const provider = {async translate(request) {
+    requests.push(request);
+    return request.segments.map(segment => ({id: segment.id, text: segment.source === 'Go to the studio' ? 'Geh ins Studio' : 'x'}));
+  }};
+  const engine = createEngine({provider, glossary: {'=Go': 'Los', Studio: 'Studio'}, cacheSize: 0});
+  const results = await engine.translate([{id: 'a', source: 'Go'}, {id: 'b', source: 'Go to the studio'}, {id: 'c', source: ' Go '}], {locale: 'de'});
+  assert.deepEqual(results.map(result => [result.text, result.status]), [['Los', 'translated'], ['Geh ins Studio', 'translated'], [' Los ', 'translated']]);
+  assert.deepEqual(requests.map(request => [request.glossary, request.segments.map(segment => segment.source)]), [[{Studio: 'Studio'}, ['Go to the studio']]]);
+});
+
+test('an exact-message term is validated and respects the review gate', async () => {
+  const provider = {async translate() { throw new Error('not called'); }};
+  const strict = createEngine({provider, glossary: {'=Go': 'Los'}, requireReviewed: true, cacheSize: 0});
+  const [review] = await strict.translate([{id: 'a', source: 'Go'}], {locale: 'de'});
+  assert.deepEqual([review.text, review.status, review.candidate], ['Go', 'needs-review', 'Los']);
+  const loose = createEngine({provider, glossary: {'=Hello {name}': 'Hallo'}, cacheSize: 0});
+  const [rejected] = await loose.translate([{id: 'b', source: 'Hello {name}'}], {locale: 'de'});
+  assert.deepEqual([rejected.text, rejected.status], ['Hello {name}', 'rejected']);
+});
