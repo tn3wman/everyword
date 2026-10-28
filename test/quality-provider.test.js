@@ -149,10 +149,10 @@ test('retries one numeric preservation failure with explicit literal requirement
   const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async (_url, options) => {
     const prompt = JSON.parse(options.body).messages[0].content;
     prompts.push(prompt);
-    return response(prompts.length === 1 ? 'Un espacio de trabajo 1' : 'Un espacio de trabajo');
+    return response(prompts.length === 1 ? 'Mi espacio de trabajo 1' : 'Mi espacio de trabajo');
   }});
-  const [result] = await provider.translate(request([{id: 'workspace', source: 'One workspace'}]));
-  assert.deepEqual(result, {id: 'workspace', text: 'Un espacio de trabajo', reviewed: false});
+  const [result] = await provider.translate(request([{id: 'workspace', source: 'My workspace'}]));
+  assert.deepEqual(result, {id: 'workspace', text: 'Mi espacio de trabajo', reviewed: false});
   assert.equal(prompts.length, 2);
   assert.doesNotMatch(prompts[0], /previous result|spelled-out numbers/);
   assert.match(prompts[1], /Keep spelled-out numbers spelled out/);
@@ -310,4 +310,81 @@ test('a retry the model server refuses reports an error, not an unsafe translati
   const [result] = await provider.translate(request([{id: 'a', source: 'Hello {name}'}]));
   assert.equal(result.status, 'error');
   assert.match(result.reason, /HTTP 503/);
+});
+
+test('retries output that adds a greeting or echoes the prompt, and frames the style note as guidance', async () => {
+  const prompts = [];
+  const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async (_url, options) => {
+    prompts.push(JSON.parse(options.body).messages[0].content);
+    return response(prompts.length === 1 ? 'Hey du, hier ist die Übersetzung – alle Platzhalter bleiben erhalten.' : 'Text');
+  }});
+  const [result] = await provider.translate({...request([{id: 'label', source: 'Text'}]), style: 'Address the reader informally with du.'});
+  assert.deepEqual(result, {id: 'label', text: 'Text', reviewed: false});
+  assert.match(prompts[0], /for your guidance only: Address the reader informally with du\. Never add a greeting/);
+});
+
+test('keeps an abbreviation expanded in translation', async () => {
+  const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async () => response('अक्सर पूछे जाने वाले प्रश्न')});
+  const [result] = await provider.translate({...request([{id: 'faq', source: 'FAQ'}]), targetLocale: 'hi'});
+  assert.deepEqual(result, {id: 'faq', text: 'अक्सर पूछे जाने वाले प्रश्न', reviewed: false});
+});
+
+test('translates a passage sentence by sentence when the whole passage keeps dropping a figure', async () => {
+  const source = 'It rises to 4,478 meters (14,692 feet). The north face overlooks Zermatt.';
+  const sources = [];
+  const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async (_url, options) => {
+    const text = sourceFromPrompt(JSON.parse(options.body).messages[0].content);
+    sources.push(text);
+    if (text === source) return response('Er erreicht 4.478 Meter. Die Nordwand blickt auf Zermatt.');
+    return response(text.startsWith('It rises') ? 'Er erreicht 4.478 Meter (14.692 Fuß).' : 'Die Nordwand blickt auf Zermatt.');
+  }});
+  const [result] = await provider.translate({...request([{id: 'peak', source}]), targetLocale: 'de'});
+  assert.deepEqual(result, {id: 'peak', text: 'Er erreicht 4.478 Meter (14.692 Fuß). Die Nordwand blickt auf Zermatt.', reviewed: false});
+  assert.deepEqual(sources.filter(text => text !== source), ['It rises to 4,478 meters (14,692 feet).', 'The north face overlooks Zermatt.']);
+});
+
+test('joins Chinese sentences without the source spaces, and reports a sentence that still fails', async () => {
+  const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async (_url, options) => {
+    const text = sourceFromPrompt(JSON.parse(options.body).messages[0].content);
+    return response({'Founded in 1934. It is large.': '成立。很大。', 'Founded in 1934.': '成立于1934年。', 'It is large.': '它很大。', 'Wait 5 days. Then go.': '等。走。', 'Wait 5 days.': '等几天。', 'Then go.': '然后走。'}[text]);
+  }});
+  const [ok, bad] = await provider.translate({...request([{id: 'park', source: 'Founded in 1934. It is large.'}, {id: 'wait', source: 'Wait 5 days. Then go.'}]), targetLocale: 'zh-CN'});
+  assert.deepEqual(ok, {id: 'park', text: '成立于1934年。它很大。', reviewed: false});
+  assert.equal(bad.status, 'rejected');
+  assert.equal(bad.text, 'Wait 5 days. Then go.');
+});
+
+test('puts the required term in place of a product name the model left in English', async () => {
+  const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async () => response('<0>Ridgeline</0> चुनें।')});
+  const [result] = await provider.translate({...request([{id: 'pick', source: 'Choose <0>Ridgeline</0>.'}]), targetLocale: 'hi', glossary: {Ridgeline: 'पर्वत-रेखाएँ'}});
+  assert.deepEqual(result, {id: 'pick', text: '<0>पर्वत-रेखाएँ</0> चुनें।', reviewed: false});
+});
+
+test('sentence fallback never splits a URL and validates the joined passage', async () => {
+  const source = 'Read https://example.com/foo?x=Hello. Wait 5 days.';
+  const sources = [];
+  const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async (_url, options) => {
+    const text = sourceFromPrompt(JSON.parse(options.body).messages[0].content);
+    sources.push(text);
+    if (text === source) return response('Lies https://example.com/foo?x=Hello. Warte Tage.');
+    return response({'Read https://example.com/foo?x=Hello.': 'Lies https://example.com/foo?x=Hello.', 'Wait 5 days.': 'Warte 5 Tage.'}[text]);
+  }});
+  const [result] = await provider.translate({...request([{id: 'url', source}]), targetLocale: 'de'});
+  assert.deepEqual(result, {id: 'url', text: 'Lies https://example.com/foo?x=Hello. Warte 5 Tage.', reviewed: false});
+  assert.ok(!sources.includes('x=Hello.'));
+});
+
+test('term enforcement leaves a URL that contains the term intact', async () => {
+  const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async () => response('Wähle Ridgeline unter https://example.com/Ridgeline.')});
+  const [result] = await provider.translate({...request([{id: 'pick', source: 'Choose Ridgeline at https://example.com/Ridgeline.'}]), targetLocale: 'de', glossary: {Ridgeline: 'Kammlinie'}});
+  assert.deepEqual(result, {id: 'pick', text: 'Wähle Kammlinie unter https://example.com/Ridgeline.', reviewed: false});
+});
+
+test('a malformed model response is an error, not a rejected translation', async () => {
+  for (const reply of [{ok: true, json: async () => ({})}, {ok: true, json: async () => ({choices: [{finish_reason: 'length', message: {}}]})}, {ok: true, json: async () => { throw new SyntaxError('Unexpected token'); }}]) {
+    const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async () => reply});
+    const [result] = await provider.translate(request([{id: 'line', source: 'Create a map of your favorite place.'}]));
+    assert.equal(result.status, 'error');
+    assert.equal(result.text, 'Create a map of your favorite place.');
+  }
 });

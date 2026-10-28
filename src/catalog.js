@@ -65,7 +65,7 @@ export async function translateCatalog({source, locales, output, provider, sourc
   const settled = await Promise.allSettled(jobs.map(async ({locale, path, glossary, engine, existing}) => {
     const translated = new Map();
     for (const key of keys) {
-      if (typeof existing[key] === 'string' && !validateTranslation(key, existing[key], {glossary})) translated.set(key, existing[key]);
+      if (typeof existing[key] === 'string' && !validateTranslation(key, existing[key], {glossary, sourceLocale})) translated.set(key, existing[key]);
     }
     const work = keys.filter(key => !translated.has(key));
     const failures = [];

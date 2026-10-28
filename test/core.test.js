@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createEngine,validateTranslation,localeDirection} from '../src/core.js';
+import {createEngine,validateTranslation,localeDirection,protectedTokens,replaceTerm,sameNumbers} from '../src/core.js';
 import {catalogProvider,modelProvider,httpProvider,fallbackProvider} from '../src/providers.js';
 const seg = (source,context='screen',id='a') => ({id,source,context});
 
@@ -144,7 +144,88 @@ test('glossary terms may contain regular expression punctuation', () => {
 });
 
 test('dates may write a named month as its number', () => {
-  assert.equal(validateTranslation('Founded on April 12, 1929.', '成立于1929年4月12日。'), null);
+  assert.equal(validateTranslation('Founded on April 12, 1929.', '成立于1929年4月12日。', {sourceLocale: 'en'}), null);
+  assert.ok(validateTranslation('Founded on April 12, 1929.', '成立于1929年4月12日。'));
   assert.ok(validateTranslation('Founded on April 12, 1929.', '成立于1929年5月12日。'));
   assert.ok(validateTranslation('Founded in 1929.', '成立于1929年4月。'));
+});
+
+test('number words in an English source may become digits, and a zero price may become a word', () => {
+  const en = {sourceLocale: 'en'};
+  assert.equal(sameNumbers("Eight of the world's fourteen peaks above 8,000 meters", '全球14座海拔超过8,000米的山峰中有8座', en), true);
+  assert.equal(sameNumbers('built in the fifteenth century', '建于15世纪', en), true);
+  assert.equal(sameNumbers('the fiftieth race', 'der 50. Lauf', en), true);
+  assert.equal(sameNumbers('built in the fifteenth century', '建于16世纪', en), false);
+  assert.equal(sameNumbers('Download for $0, then print it', 'Lade sie kostenlos herunter', en), true);
+  assert.equal(sameNumbers('Up to 30 km for $0', 'Bis zu 30 km kostenlos', en), true);
+  assert.equal(sameNumbers('Up to 30 km for $0', 'Bis zu km kostenlos', en), false);
+  assert.equal(sameNumbers('Wait 0 seconds', 'Warte Sekunden', en), false);
+  assert.equal(sameNumbers('You may print it', 'Du kannst es im 5. Monat drucken', en), false);
+  // Parts of a compound number are not its value.
+  assert.equal(sameNumbers('one hundred peaks above 8,000 meters', '海拔8,000米以上的1座山峰', en), false);
+  assert.equal(sameNumbers('twenty-one peaks', '20座山峰', en), false);
+  assert.equal(sameNumbers('twenty one peaks', '1座山峰', en), false);
+  assert.equal(sameNumbers('one hundred and one peaks', '1座山峰', en), false);
+  assert.equal(sameNumbers('twenty\u2011one peaks', '20座山峰', en), false);
+  assert.equal(sameNumbers('Set the scale to one point five', '将比例设置为1', en), false);
+  assert.equal(sameNumbers('twenty point five', '20', en), false);
+  assert.equal(sameNumbers('two oh five', '2', en), false);
+  // Only an English source has English number words: French "four" is an oven.
+  assert.equal(sameNumbers('Four', '4', {sourceLocale: 'fr'}), false);
+  assert.equal(sameNumbers('Four', '4'), false);
+  assert.equal(sameNumbers('four peaks', '4 picos', {sourceLocale: 'en-GB'}), true);
+});
+
+test('a percent sign before a word is not a printf placeholder', () => {
+  assert.deepEqual(protectedTokens('10 to 15% infill and 98% of the state'), []);
+  assert.deepEqual(protectedTokens('Saved %d files to %s'), ['%d', '%s']);
+  assert.deepEqual(protectedTokens('Count: % d'), ['% d']);
+  assert.match(validateTranslation('Count: % d', 'Anzahl: d'), /placeholder|token/i);
+  assert.match(validateTranslation('Count: % d', 'Anzahl: % s'), /placeholder|token/i);
+});
+
+test('a century may be written as a Roman numeral, and a URL keeps its attached punctuation', () => {
+  const en = {sourceLocale: 'en'};
+  assert.equal(sameNumbers('dug in the 17th century', 'excavado en el siglo XVII', en), true);
+  assert.equal(sameNumbers("Barcelona's 19th-century extension", 'extension du XIXe siècle de Barcelone', en), true);
+  assert.equal(sameNumbers('dug in the 17th century', 'excavado en el siglo XVIII', en), false);
+  assert.equal(sameNumbers('dug in the 17th century', 'excavado en el siglo XVII', {sourceLocale: 'fr'}), false);
+  // A URL keeps the punctuation attached to it, so moving that punctuation fails safe.
+  assert.deepEqual(protectedTokens('Stripe (https://stripe.com/privacy); Mapbox https://mapbox.com/a'), ['https://mapbox.com/a', 'https://stripe.com/privacy);']);
+  assert.equal(validateTranslation('Read https://stripe.com/privacy then go.', 'Lies https://stripe.com/privacy und geh.'), null);
+  assert.ok(validateTranslation('Read (https://stripe.com/privacy); then go.', 'Lies (https://stripe.com/privacy) und geh.'));
+  assert.ok(validateTranslation('Read (https://stripe.com/privacy); then go.', '阅读（https://stripe.com/privacy）；然后走。'));
+});
+
+test('review reproductions: URL parentheses, full-width paths, repeated centuries and fractions', () => {
+  const en = {sourceLocale: 'en'};
+  assert.ok(validateTranslation('See https://en.wikipedia.org/wiki/Paris_(mythology)', 'Voir https://en.wikipedia.org/wiki/Paris_(mythology'));
+  assert.equal(validateTranslation('See https://en.wikipedia.org/wiki/Paris_(mythology) now', 'Voir https://en.wikipedia.org/wiki/Paris_(mythology) maintenant'), null);
+  assert.ok(validateTranslation('Open https://example.com/ＡＢＣ now', 'Öffne https://example.com/ＤＥＦ jetzt'));
+  assert.equal(sameNumbers('The 17th century followed the 17th century.', 'El siglo XVII.', en), false);
+  assert.equal(sameNumbers('The 17th century followed the 17th century.', 'El siglo XVII siguió al siglo XVII.', en), true);
+  assert.equal(sameNumbers('Wait one and a third days.', 'Warte 3 Tage.', en), false);
+  assert.equal(sameNumbers('two and a fifth', '5', en), false);
+  assert.equal(sameNumbers('three fifths of the area', '3 der Fläche', en), false);
+  assert.equal(sameNumbers('Wait five seconds.', 'Warte 5 Sekunden.', en), true);
+  assert.equal(sameNumbers('Take one a day.', 'Nimm 1 täglich.', en), true);
+  assert.equal(sameNumbers('Add a third layer.', 'Füge eine 3 Schicht hinzu.', en), false);
+  assert.ok(validateTranslation('Open https://example.com/search?q=(a(b)) now', 'Öffne https://example.com/search?q=(c(d)) jetzt'));
+  assert.equal(validateTranslation('Open https://example.com/search?q=(a(b)) now', 'Öffne https://example.com/search?q=(a(b)) jetzt'), null);
+});
+
+test('a glossary term is replaced outside URLs and placeholders only', () => {
+  assert.equal(replaceTerm('Wähle Ridgeline unter https://example.com/Ridgeline.', 'Ridgeline', 'Kammlinie'), 'Wähle Kammlinie unter https://example.com/Ridgeline.');
+  assert.equal(replaceTerm('{Ridgeline} and Ridgeline', 'Ridgeline', 'X'), '{Ridgeline} and X');
+});
+
+test('a URL change hidden behind full-width punctuation, a tab or an uppercase scheme is caught', () => {
+  assert.ok(validateTranslation('Open https://trusted.example now', 'Öffne https://trusted.example／@evil.example jetzt'));
+  assert.ok(validateTranslation('Open HTTPS://example.com now', 'Öffne HTTPS://evil.example jetzt'));
+  assert.equal(validateTranslation('Open HTTPS://example.com now', 'Öffne HTTPS://example.com jetzt'), null);
+  assert.equal(replaceTerm('https://example.com/a。Ridgeline', 'Ridgeline', 'Kammlinie'), 'https://example.com/a。Ridgeline');
+  assert.ok(validateTranslation('Open https://trusted.example now', 'Öffne https://trusted.example\t@evil.example jetzt'));
+  assert.ok(validateTranslation('Open https://trusted.example now', 'Öffne https:evil.example/?https://trusted.example jetzt'));
+  assert.ok(validateTranslation('Open https://example.com/時々 now', 'Öffne https://example.com/時 jetzt'));
+  assert.ok(validateTranslation('Open https://example.com/path now', 'Öffne https://example.com/path／ jetzt'));
 });
