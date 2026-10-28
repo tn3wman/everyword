@@ -116,3 +116,14 @@ test('a kept translation that uses a word the style avoids is translated again',
   assert.deepEqual(requests.map(request => [request.style, request.avoid, request.segments.map(segment => segment.source)]), [['Address the reader with du.', ['Sie', 'Ihre'], ['Save your files']]]);
   assert.deepEqual(await files.read('de'), {'Save your files': 'Speichere deine Dateien', Open: 'Öffnen'});
 });
+
+test('a provider that ignores the avoid list cannot save an avoided word', async () => {
+  const files = await project(entries('Save your files'));
+  const provider = {async translate(request) {
+    return request.segments.map(segment => ({id: segment.id, text: 'Speichern Sie Ihre Dateien'}));
+  }};
+  const report = await translateCatalog({source: files.source, locales: ['de'], output: files.output, provider, styles: {de: {note: 'du', avoid: ['Sie']}}});
+  assert.equal(report.ready, false);
+  assert.match(report.locales[0].failures[0].reason, /"Sie", which the style avoids/);
+  assert.deepEqual(await files.read('de'), {});
+});

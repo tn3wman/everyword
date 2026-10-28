@@ -164,8 +164,10 @@ export function replaceTerm(text, term, replacement) {
   return result + text.slice(offset).replace(pattern, () => replacement);
 }
 
-export function validateTranslation(source, text, {glossary = {}, preserveNumbers = true, sourceLocale} = {}) {
+export function validateTranslation(source, text, {glossary = {}, preserveNumbers = true, sourceLocale, avoid = []} = {}) {
   if (typeof text !== 'string' || !text.trim()) return 'The provider returned empty or invalid text.';
+  // Whole-word and case-sensitive: German "Sie" (you, formal) but not "sie" (she, they).
+  for (const word of avoid) if (hasTerm(text, word) && !hasTerm(source, word)) return `The translation used "${word}", which the style avoids.`;
   if (text.length > Math.max(2048, source.length * 8)) return 'The translation is unexpectedly long.';
   if (/\{\s*\w+\s*,\s*(plural|select|selectordinal)\s*,/.test(source)) return 'ICU plural/select messages require a message-format adapter.';
   if (/<\/?[a-zA-Z][^>]*>/.test(source)) return 'HTML messages require the DOM adapter or a parsed HTML integration.';
@@ -267,7 +269,7 @@ export function createEngine({sourceLocale = 'en', provider, requireReviewed = f
           else if (['missing','rejected','error','needs-review'].includes(output.status)) {
             result = {text:p.source, status:output.status, reviewed:false, reason:typeof output.reason === 'string' ? output.reason.slice(0,1000) : 'The service retained the source text.'};
           } else {
-            const reason = validateTranslation(p.source, output.text, {...requestPolicy, sourceLocale});
+            const reason = validateTranslation(p.source, output.text, {...requestPolicy, sourceLocale, avoid});
             if (reason) result = {text: p.source, status: 'rejected', reviewed: false, reason};
             else if (requestPolicy.requireReviewed && output.reviewed !== true) result = {text: p.source, status: 'needs-review', reviewed: false, candidate:output.text.trim(), reason: 'Approve this translation before displaying it.'};
             else result = {text: output.text.trim(), status: 'translated', reviewed: output.reviewed === true};

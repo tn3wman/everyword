@@ -1,6 +1,6 @@
 import {mkdir, readFile, rename, writeFile} from 'node:fs/promises';
 import {dirname} from 'node:path';
-import {canonicalLocale, createEngine, hasTerm, validateTranslation} from './core.js';
+import {canonicalLocale, createEngine, validateTranslation} from './core.js';
 
 const BATCH = 64;
 
@@ -83,8 +83,7 @@ export async function translateCatalog({source, locales, output, provider, sourc
     const translated = new Map();
     for (const key of keys) {
       // A kept translation must still meet the style: one using an avoided word is translated again.
-      const avoided = avoidFor(styles, locale).some(word => hasTerm(existing[key] ?? '', word) && !hasTerm(key, word));
-      if (typeof existing[key] === 'string' && !avoided && !validateTranslation(key, existing[key], {glossary, sourceLocale})) translated.set(key, existing[key]);
+      if (typeof existing[key] === 'string' && !validateTranslation(key, existing[key], {glossary, sourceLocale, avoid: avoidFor(styles, locale)})) translated.set(key, existing[key]);
     }
     const work = keys.filter(key => !translated.has(key));
     const failures = [];
