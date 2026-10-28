@@ -414,3 +414,18 @@ test('a short label that absorbs its context is retried, then rejected; real sho
   const [lower] = await cased.translate({...request([{id: 'c', source: 'Coordinates', context: 'map coordinate display'}]), glossary: {Coordinates: 'Latitud, longitud'}});
   assert.deepEqual(lower, {id: 'c', text: 'latitud, longitud', reviewed: false});
 });
+
+test('a translation using a word the style avoids is retried with that word named, then rejected', async () => {
+  const prompts = [];
+  const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async (_url, options) => {
+    prompts.push(JSON.parse(options.body).messages[0].content);
+    return response(prompts.length === 1 ? 'Speichern Sie Ihre Dateien' : 'Speichere deine Dateien');
+  }});
+  const [result] = await provider.translate({...request([{id: 'save', source: 'Save your files'}]), targetLocale: 'de', avoid: ['Sie', 'Ihre']});
+  assert.deepEqual(result, {id: 'save', text: 'Speichere deine Dateien', reviewed: false});
+  assert.match(prompts[1], /Do not use these words: "Sie", "Ihre"\./);
+  const stubborn = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async () => response('Speichern Sie Ihre Dateien')});
+  const [rejected] = await stubborn.translate({...request([{id: 'save', source: 'Save your files'}]), targetLocale: 'de', avoid: ['Sie']});
+  assert.equal(rejected.status, 'rejected');
+  assert.match(rejected.reason, /"Sie", which the style avoids/);
+});

@@ -1,6 +1,6 @@
 import {mkdir, readFile, rename, writeFile} from 'node:fs/promises';
 import {dirname} from 'node:path';
-import {canonicalLocale, createEngine, validateTranslation} from './core.js';
+import {canonicalLocale, createEngine, hasTerm, validateTranslation} from './core.js';
 
 const BATCH = 64;
 
@@ -30,9 +30,21 @@ export function glossaryFor(glossaries, locale) {
   return {...glossaries['*'], ...glossaries[language], ...glossaries[locale]};
 }
 
-/** Style file: {"<locale>": "Address the reader with du."}; the most specific entry wins. */
-export function styleFor(styles, locale) {
+/**
+ * Style file: {"<locale>": "Address the reader with du."} or {"<locale>": {"note": "…", "avoid":
+ * ["Sie", "Ihr"]}}; the most specific entry wins. A translation that uses an avoided word the source
+ * does not is retried, then left out.
+ */
+function styleEntry(styles, locale) {
   return styles[locale] ?? styles[new Intl.Locale(locale).language] ?? styles['*'] ?? '';
+}
+export function styleFor(styles, locale) {
+  const entry = styleEntry(styles, locale);
+  return typeof entry === 'string' ? entry : entry.note ?? '';
+}
+export function avoidFor(styles, locale) {
+  const entry = styleEntry(styles, locale);
+  return typeof entry === 'string' ? [] : entry.avoid ?? [];
 }
 
 /**
@@ -60,7 +72,7 @@ export async function translateCatalog({source, locales, output, provider, sourc
   const jobs = await Promise.all(targets.map(async locale => {
     const path = output(locale);
     const glossary = glossaryFor(glossaries, locale);
-    const engine = createEngine({sourceLocale, provider, glossary, style: styleFor(styles, locale), cacheSize: 0, batchSize: BATCH});
+    const engine = createEngine({sourceLocale, provider, glossary, style: styleFor(styles, locale), avoid: avoidFor(styles, locale), cacheSize: 0, batchSize: BATCH});
     return {locale, path, glossary, engine, existing: plainCatalog(await readJSON(path, {}), path)};
   }));
   // Locales share the provider, so its concurrency limit stays saturated across batch boundaries.
@@ -70,7 +82,9 @@ export async function translateCatalog({source, locales, output, provider, sourc
   const settled = await Promise.allSettled(jobs.map(async ({locale, path, glossary, engine, existing}) => {
     const translated = new Map();
     for (const key of keys) {
-      if (typeof existing[key] === 'string' && !validateTranslation(key, existing[key], {glossary, sourceLocale})) translated.set(key, existing[key]);
+      // A kept translation must still meet the style: one using an avoided word is translated again.
+      const avoided = avoidFor(styles, locale).some(word => hasTerm(existing[key] ?? '', word) && !hasTerm(key, word));
+      if (typeof existing[key] === 'string' && !avoided && !validateTranslation(key, existing[key], {glossary, sourceLocale})) translated.set(key, existing[key]);
     }
     const work = keys.filter(key => !translated.has(key));
     const failures = [];

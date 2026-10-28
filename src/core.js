@@ -187,11 +187,13 @@ export function summarize(results, locale, issues = []) {
     issues, segments: results};
 }
 
-export function createEngine({sourceLocale = 'en', provider, requireReviewed = false, glossary = {}, style = '', preserveNumbers = true, cacheSize = 2000, batchSize = 64} = {}) {
+export function createEngine({sourceLocale = 'en', provider, requireReviewed = false, glossary = {}, style = '', avoid = [], preserveNumbers = true, cacheSize = 2000, batchSize = 64} = {}) {
   sourceLocale = canonicalLocale(sourceLocale);
   if (!provider || typeof provider.translate !== 'function') throw new TypeError('A translation provider is required.');
   // A target-language style note for the translator, such as "Address the reader with du."
   if (typeof style !== 'string' || style.length > 500) throw new TypeError('style must be a string of at most 500 characters.');
+  // Words the style rules out, such as German "Sie" for a site that addresses its reader with du.
+  if (!Array.isArray(avoid) || avoid.length > 50 || avoid.some(word => typeof word !== 'string' || !word || word.length > 50)) throw new TypeError('avoid must list at most 50 nonempty words.');
   if (!Number.isInteger(cacheSize) || cacheSize < 0 || !Number.isInteger(batchSize) || batchSize < 1 || batchSize > 256) throw new TypeError('Invalid cache or batch size.');
   let policy;
   let epoch = 0;
@@ -244,7 +246,7 @@ export function createEngine({sourceLocale = 'en', provider, requireReviewed = f
         const request = batch.map((p, index) => ({id: `s${offset + index}`, source: p.source, context: p.s.context ?? '', kind: p.s.kind ?? 'text'}));
         let outputs;
         try {
-          outputs = await provider.translate({sourceLocale, targetLocale: locale, segments: request, glossary: requestPolicy.glossary, ...(style ? {style} : {}), signal});
+          outputs = await provider.translate({sourceLocale, targetLocale: locale, segments: request, glossary: requestPolicy.glossary, ...(style ? {style} : {}), ...(avoid.length ? {avoid} : {}), signal});
           signal?.throwIfAborted();
           if (!Array.isArray(outputs)) throw new TypeError('The provider response must be an array.');
           const outputIds = new Set();
