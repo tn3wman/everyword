@@ -102,12 +102,12 @@ export function localProvider({python=process.env.EVERYWORD_PYTHON ?? defaultPyt
         if(!Array.isArray(retried.texts)||retried.texts.length!==menuRetries.length)throw new Error('Invalid local menu response.');
         menuRetries.forEach((source,index)=>{
           const text=retried.texts[index];
-          if(typeof text==='string'&&text!==source.toLocaleLowerCase(sourceLocale)&&!validateTranslation(source,text,{glossary}))outputs.set(source,text);
+          if(typeof text==='string'&&text!==source.toLocaleLowerCase(sourceLocale)&&!validateTranslation(source,text,{glossary,sourceLocale}))outputs.set(source,text);
         });
       }
       // Neural models can alter interpolation syntax. Repair automatically by translating
       // only the natural-language spans around data tokens, without requesting approval.
-      const repairs=sources.filter(source=>validateTranslation(source,outputs.get(source),{glossary}));
+      const repairs=sources.filter(source=>validateTranslation(source,outputs.get(source),{glossary,sourceLocale}));
       if(repairs.length){
         const spans=[];
         const layouts=repairs.map(source=>{

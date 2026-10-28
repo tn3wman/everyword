@@ -13,7 +13,7 @@ export function localeDirection(locale) {
 
 // These tokens are data or interpolation syntax, never natural-language copy.
 // Numbered rich-text markers such as <0>, </0> and <1/> (Lingui, react-intl, i18next Trans).
-export const PROTECTED_PATTERN = /\{\{[^{}]+\}\}|\$\{[^{}]+\}|\{[\w.]+\}|%(?:\d+\$)?[-+#0 ]*\d*(?:\.\d+)?[sdifuxXoeEgGc]|%\([\w]+\)[sdif]|https?:\/\/[^\s<>]+|[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}|<\/?\d+\s*\/?>/gu;
+export const PROTECTED_PATTERN = /\{\{[^{}]+\}\}|\$\{[^{}]+\}|\{[\w.]+\}|%(?:\d+\$)?[-+#0]*\d*(?:\.\d+)?[sdifuxXoeEgGc]|%(?:\d+\$)?[-+#0]* [-+#0 ]*\d*(?:\.\d+)?[sdifuxXoeEgGc](?![\p{L}\p{N}])|%\([\w]+\)[sdif]|https?:\/\/[^\s<>]+|[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}|<\/?\d+\s*\/?>/gu;
 
 export function protectedTokens(text) {
   return (text.match(PROTECTED_PATTERN) ?? []).sort();
@@ -60,21 +60,48 @@ export function numericTokens(text) {
 }
 
 const MONTHS = ['january','february','march','april','may','june','july','august','september','october','november','december'];
+const UNITS = ['zero','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen'];
+const UNIT_ORDINALS = ['zeroth','first','second','third','fourth','fifth','sixth','seventh','eighth','ninth','tenth','eleventh','twelfth','thirteenth','fourteenth','fifteenth','sixteenth','seventeenth','eighteenth','nineteenth'];
+// Words that combine with a number word into a larger or fractional number.
+const NUMBER_PARTS = new Set(['hundred', 'thousand', 'million', 'billion', 'trillion', 'dozen', 'hundredth', 'thousandth', 'millionth', 'and', 'point', 'dot', 'oh', 'minus', 'negative', 'plus', 'times', 'over', 'half', 'halves', 'quarter', 'quarters', 'thirds']);
+const TENS = ['twenty','thirty','forty','fifty','sixty','seventy','eighty','ninety'];
+// English number words and the digits a translation may write for them ("fourteen peaks" → 14座山峰).
+const NUMBER_WORDS = new Map([
+  ...UNITS.map((word, value) => [word, value]),
+  ...UNIT_ORDINALS.map((word, value) => [word, value]),
+  ...TENS.map((word, index) => [word, (index + 2) * 10]),
+  ...TENS.map((word, index) => [`${word.slice(0, -1)}ieth`, (index + 2) * 10]),
+]);
 
 /**
- * The translation keeps every digit sequence of the source. It may add a month's number only for a
- * month the English source names, as Chinese, Japanese and Korean dates write "April 12" as 4月12日.
+ * The translation keeps every digit sequence of the source. From an English source (sourceLocale
+ * "en" or "en-…"; without one, no allowance applies) it may also write digits for words the source
+ * spells out: a month ("April 12" → 4月12日) or a standalone number up to nineteen, a multiple of
+ * ten, or their ordinals ("the fifteenth century" → 15世纪). A zero price ("$0") may become a word
+ * such as "free".
  */
-export function sameNumbers(source, text) {
+export function sameNumbers(source, text, {sourceLocale} = {}) {
   const extra = numericTokens(text);
+  const english = !!sourceLocale && new Intl.Locale(canonicalLocale(sourceLocale)).language === 'en';
+  const zeroPrices = !english ? 0 : (source.match(/[$€£¥]0(?![.,]?\d)|(?<!\d[.,]?)0 ?[$€£¥]/gu) ?? []).length;
+  let droppedZeros = 0;
   for (const token of numericTokens(source)) {
     const index = extra.indexOf(token);
-    if (index < 0) return false;
-    extra.splice(index, 1);
+    if (index >= 0) extra.splice(index, 1);
+    else if (token === '0' && droppedZeros < zeroPrices) droppedZeros++;
+    else return false;
   }
-  const months = source.match(/\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\b/g) ?? [];
-  for (const month of months) {
-    const index = extra.indexOf(String(MONTHS.indexOf(month.toLowerCase()) + 1));
+  const words = english ? [...source.matchAll(/\p{L}+/gu)].map(([word]) => word) : [];
+  const numeric = word => !!word && (NUMBER_WORDS.has(word.toLowerCase()) || NUMBER_PARTS.has(word.toLowerCase()));
+  for (const [position, word] of words.entries()) {
+    const lower = word.toLowerCase();
+    // Only a number word standing alone is its value: in "twenty-one", "one hundred and one" or
+    // "one point five", each part is not.
+    if (NUMBER_WORDS.has(lower) && (numeric(words[position - 1]) || numeric(words[position + 1]))) continue;
+    const month = MONTHS.indexOf(lower);
+    const value = month >= 0 && /^\p{Lu}/u.test(word) ? month + 1 : NUMBER_WORDS.get(lower);
+    if (value === undefined) continue;
+    const index = extra.indexOf(String(value));
     if (index >= 0) extra.splice(index, 1);
   }
   return extra.length === 0;
@@ -93,7 +120,7 @@ export function hasTerm(text, term, {ignoreCase = false} = {}) {
   return new RegExp(`(?<!${WORD})${escaped}(?!${WORD})`, ignoreCase ? 'iv' : 'v').test(text);
 }
 
-export function validateTranslation(source, text, {glossary = {}, preserveNumbers = true} = {}) {
+export function validateTranslation(source, text, {glossary = {}, preserveNumbers = true, sourceLocale} = {}) {
   if (typeof text !== 'string' || !text.trim()) return 'The provider returned empty or invalid text.';
   if (text.length > Math.max(2048, source.length * 8)) return 'The translation is unexpectedly long.';
   if (/\{\s*\w+\s*,\s*(plural|select|selectordinal)\s*,/.test(source)) return 'ICU plural/select messages require a message-format adapter.';
@@ -101,7 +128,7 @@ export function validateTranslation(source, text, {glossary = {}, preserveNumber
   if (/<\/?[a-zA-Z][^>]*>/.test(text)) return 'The provider added HTML to a plain-text translation.';
   if (!sameTokens(protectedTokens(source), protectedTokens(text))) return 'The translation changed a placeholder, URL, or email address.';
   if (!balancedMarkers(text)) return 'The translation misplaced a numbered rich-text marker.';
-  if (preserveNumbers && !sameNumbers(source, text)) return 'The translation changed a numeric value.';
+  if (preserveNumbers && !sameNumbers(source, text, {sourceLocale})) return 'The translation changed a numeric value.';
   for (const [term, replacement] of Object.entries(glossary)) {
     if (hasTerm(source, term) && !hasTerm(text, replacement, {ignoreCase: true})) return `The translation did not preserve the glossary term "${term}".`;
   }
@@ -194,7 +221,7 @@ export function createEngine({sourceLocale = 'en', provider, requireReviewed = f
           else if (['missing','rejected','error','needs-review'].includes(output.status)) {
             result = {text:p.source, status:output.status, reviewed:false, reason:typeof output.reason === 'string' ? output.reason.slice(0,1000) : 'The service retained the source text.'};
           } else {
-            const reason = validateTranslation(p.source, output.text, requestPolicy);
+            const reason = validateTranslation(p.source, output.text, {...requestPolicy, sourceLocale});
             if (reason) result = {text: p.source, status: 'rejected', reviewed: false, reason};
             else if (requestPolicy.requireReviewed && output.reviewed !== true) result = {text: p.source, status: 'needs-review', reviewed: false, candidate:output.text.trim(), reason: 'Approve this translation before displaying it.'};
             else result = {text: output.text.trim(), status: 'translated', reviewed: output.reviewed === true};

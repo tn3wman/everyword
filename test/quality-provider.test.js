@@ -149,10 +149,10 @@ test('retries one numeric preservation failure with explicit literal requirement
   const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async (_url, options) => {
     const prompt = JSON.parse(options.body).messages[0].content;
     prompts.push(prompt);
-    return response(prompts.length === 1 ? 'Un espacio de trabajo 1' : 'Un espacio de trabajo');
+    return response(prompts.length === 1 ? 'Mi espacio de trabajo 1' : 'Mi espacio de trabajo');
   }});
-  const [result] = await provider.translate(request([{id: 'workspace', source: 'One workspace'}]));
-  assert.deepEqual(result, {id: 'workspace', text: 'Un espacio de trabajo', reviewed: false});
+  const [result] = await provider.translate(request([{id: 'workspace', source: 'My workspace'}]));
+  assert.deepEqual(result, {id: 'workspace', text: 'Mi espacio de trabajo', reviewed: false});
   assert.equal(prompts.length, 2);
   assert.doesNotMatch(prompts[0], /previous result|spelled-out numbers/);
   assert.match(prompts[1], /Keep spelled-out numbers spelled out/);
@@ -310,4 +310,21 @@ test('a retry the model server refuses reports an error, not an unsafe translati
   const [result] = await provider.translate(request([{id: 'a', source: 'Hello {name}'}]));
   assert.equal(result.status, 'error');
   assert.match(result.reason, /HTTP 503/);
+});
+
+test('retries output that adds a greeting or echoes the prompt, and frames the style note as guidance', async () => {
+  const prompts = [];
+  const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async (_url, options) => {
+    prompts.push(JSON.parse(options.body).messages[0].content);
+    return response(prompts.length === 1 ? 'Hey du, hier ist die Übersetzung – alle Platzhalter bleiben erhalten.' : 'Text');
+  }});
+  const [result] = await provider.translate({...request([{id: 'label', source: 'Text'}]), style: 'Address the reader informally with du.'});
+  assert.deepEqual(result, {id: 'label', text: 'Text', reviewed: false});
+  assert.match(prompts[0], /for your guidance only: Address the reader informally with du\. Never add a greeting/);
+});
+
+test('keeps an abbreviation expanded in translation', async () => {
+  const provider = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async () => response('अक्सर पूछे जाने वाले प्रश्न')});
+  const [result] = await provider.translate({...request([{id: 'faq', source: 'FAQ'}]), targetLocale: 'hi'});
+  assert.deepEqual(result, {id: 'faq', text: 'अक्सर पूछे जाने वाले प्रश्न', reviewed: false});
 });

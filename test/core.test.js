@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createEngine,validateTranslation,localeDirection} from '../src/core.js';
+import {createEngine,validateTranslation,localeDirection,protectedTokens,sameNumbers} from '../src/core.js';
 import {catalogProvider,modelProvider,httpProvider,fallbackProvider} from '../src/providers.js';
 const seg = (source,context='screen',id='a') => ({id,source,context});
 
@@ -144,7 +144,42 @@ test('glossary terms may contain regular expression punctuation', () => {
 });
 
 test('dates may write a named month as its number', () => {
-  assert.equal(validateTranslation('Founded on April 12, 1929.', '成立于1929年4月12日。'), null);
+  assert.equal(validateTranslation('Founded on April 12, 1929.', '成立于1929年4月12日。', {sourceLocale: 'en'}), null);
+  assert.ok(validateTranslation('Founded on April 12, 1929.', '成立于1929年4月12日。'));
   assert.ok(validateTranslation('Founded on April 12, 1929.', '成立于1929年5月12日。'));
   assert.ok(validateTranslation('Founded in 1929.', '成立于1929年4月。'));
+});
+
+test('number words in an English source may become digits, and a zero price may become a word', () => {
+  const en = {sourceLocale: 'en'};
+  assert.equal(sameNumbers("Eight of the world's fourteen peaks above 8,000 meters", '全球14座海拔超过8,000米的山峰中有8座', en), true);
+  assert.equal(sameNumbers('built in the fifteenth century', '建于15世纪', en), true);
+  assert.equal(sameNumbers('the fiftieth race', 'der 50. Lauf', en), true);
+  assert.equal(sameNumbers('built in the fifteenth century', '建于16世纪', en), false);
+  assert.equal(sameNumbers('Download for $0, then print it', 'Lade sie kostenlos herunter', en), true);
+  assert.equal(sameNumbers('Up to 30 km for $0', 'Bis zu 30 km kostenlos', en), true);
+  assert.equal(sameNumbers('Up to 30 km for $0', 'Bis zu km kostenlos', en), false);
+  assert.equal(sameNumbers('Wait 0 seconds', 'Warte Sekunden', en), false);
+  assert.equal(sameNumbers('You may print it', 'Du kannst es im 5. Monat drucken', en), false);
+  // Parts of a compound number are not its value.
+  assert.equal(sameNumbers('one hundred peaks above 8,000 meters', '海拔8,000米以上的1座山峰', en), false);
+  assert.equal(sameNumbers('twenty-one peaks', '20座山峰', en), false);
+  assert.equal(sameNumbers('twenty one peaks', '1座山峰', en), false);
+  assert.equal(sameNumbers('one hundred and one peaks', '1座山峰', en), false);
+  assert.equal(sameNumbers('twenty\u2011one peaks', '20座山峰', en), false);
+  assert.equal(sameNumbers('Set the scale to one point five', '将比例设置为1', en), false);
+  assert.equal(sameNumbers('twenty point five', '20', en), false);
+  assert.equal(sameNumbers('two oh five', '2', en), false);
+  // Only an English source has English number words: French "four" is an oven.
+  assert.equal(sameNumbers('Four', '4', {sourceLocale: 'fr'}), false);
+  assert.equal(sameNumbers('Four', '4'), false);
+  assert.equal(sameNumbers('four peaks', '4 picos', {sourceLocale: 'en-GB'}), true);
+});
+
+test('a percent sign before a word is not a printf placeholder', () => {
+  assert.deepEqual(protectedTokens('10 to 15% infill and 98% of the state'), []);
+  assert.deepEqual(protectedTokens('Saved %d files to %s'), ['%d', '%s']);
+  assert.deepEqual(protectedTokens('Count: % d'), ['% d']);
+  assert.match(validateTranslation('Count: % d', 'Anzahl: d'), /placeholder|token/i);
+  assert.match(validateTranslation('Count: % d', 'Anzahl: % s'), /placeholder|token/i);
 });
