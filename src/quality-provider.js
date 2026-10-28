@@ -214,7 +214,8 @@ function expandsLabel(chunk, text, glossary) {
   const source = chunk.source;
   if (!humanContext(chunk.context) || source.trim().split(/\s+/u).length > 2 || !/\p{L}/u.test(source)) return false;
   // A required glossary translation may bring its own punctuation.
-  for (const replacement of Object.values(glossary)) text = text.split(replacement).join(' ');
+  // Case-insensitive, as the glossary check allows a required term to change case.
+  for (const replacement of Object.values(glossary)) text = text.replace(new RegExp(replacement.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'giu'), ' ');
   if ((text.match(CLAUSE_PUNCTUATION) ?? []).length > (source.match(CLAUSE_PUNCTUATION) ?? []).length) return true;
   return text.trim().split(/\s+/u).length > 4 || (text.match(HAN_OR_KANA) ?? []).length > 8;
 }

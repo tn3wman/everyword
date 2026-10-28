@@ -410,4 +410,7 @@ test('a short label that absorbs its context is retried, then rejected; real sho
   const required = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async () => response('纬度，经度')});
   const [coordinates] = await required.translate({...request([{id: 'c', source: 'Coordinates', context: 'map coordinate display'}]), targetLocale: 'zh-CN', glossary: {Coordinates: '纬度，经度'}});
   assert.deepEqual(coordinates, {id: 'c', text: '纬度，经度', reviewed: false});
+  const cased = qualityProvider({baseURL: 'http://127.0.0.1:8080/v1', fetch: async () => response('latitud, longitud')});
+  const [lower] = await cased.translate({...request([{id: 'c', source: 'Coordinates', context: 'map coordinate display'}]), glossary: {Coordinates: 'Latitud, longitud'}});
+  assert.deepEqual(lower, {id: 'c', text: 'latitud, longitud', reviewed: false});
 });
