@@ -164,6 +164,15 @@ export function replaceTerm(text, term, replacement) {
   return result + text.slice(offset).replace(pattern, () => replacement);
 }
 
+/**
+ * Whether a glossary term applies to a source message. A term written "=Go" applies only when the
+ * whole message is "Go", so a short label can have its own translation without that word being
+ * forced into longer messages ("Open the creator…").
+ */
+export function termApplies(source, term) {
+  return term.startsWith('=') ? source.trim() === term.slice(1) : hasTerm(source, term);
+}
+
 export function validateTranslation(source, text, {glossary = {}, preserveNumbers = true, sourceLocale, avoid = []} = {}) {
   if (typeof text !== 'string' || !text.trim()) return 'The provider returned empty or invalid text.';
   // Whole-word and case-sensitive: German "Sie" (you, formal) but not "sie" (she, they).
@@ -176,7 +185,7 @@ export function validateTranslation(source, text, {glossary = {}, preserveNumber
   if (!balancedMarkers(text)) return 'The translation misplaced a numbered rich-text marker.';
   if (preserveNumbers && !sameNumbers(source, text, {sourceLocale})) return 'The translation changed a numeric value.';
   for (const [term, replacement] of Object.entries(glossary)) {
-    if (hasTerm(source, term) && !hasTerm(text, replacement, {ignoreCase: true})) return `The translation did not preserve the glossary term "${term}".`;
+    if (termApplies(source, term) && !hasTerm(text, replacement, {ignoreCase: true})) return `The translation did not preserve the glossary term "${term}".`;
   }
   return null;
 }

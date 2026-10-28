@@ -229,3 +229,10 @@ test('a URL change hidden behind full-width punctuation, a tab or an uppercase s
   assert.ok(validateTranslation('Open https://example.com/時々 now', 'Öffne https://example.com/時 jetzt'));
   assert.ok(validateTranslation('Open https://example.com/path now', 'Öffne https://example.com/path／ jetzt'));
 });
+
+test('an exact-message glossary term applies to that whole message only', () => {
+  const glossary = {'=Go': 'Los'};
+  assert.match(validateTranslation('Go', 'Gehen', {glossary}), /glossary term "=Go"/);
+  assert.equal(validateTranslation('Go', 'Los', {glossary}), null);
+  assert.equal(validateTranslation('Go to the studio', 'Geh ins Studio', {glossary}), null);
+});
