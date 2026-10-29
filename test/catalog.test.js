@@ -135,3 +135,11 @@ test('a marker naming another catalog message uses that message\'s translation',
   await translateCatalog({source: files.source, locales: ['de'], output: files.output, provider});
   assert.deepEqual(await files.read('de'), {Go: 'Los', 'Enter coordinates and select <1>Go</1>.': 'Gib Koordinaten ein und wähle <1>Los</1>.', 'Open <0>Settings</0>': 'Öffne <0>Einstellungen</0>'});
 });
+
+test('label alignment skips repeated marker numbers and keeps text that would fail validation', async () => {
+  const translations = new Map([['Go', 'Los'], ['Save', 'Speichern'], ['Count', '{n}']]);
+  const {alignLabels} = await import('../src/catalog.js');
+  assert.equal(alignLabels('<0>Go</0> then <0>Save</0>', '<0>Weiter</0> dann <0>Sichern</0>', translations), '<0>Weiter</0> dann <0>Sichern</0>');
+  assert.equal(alignLabels('Select <1>Count</1>.', 'Wähle <1>Anzahl</1>.', translations), 'Wähle <1>Anzahl</1>.');
+  assert.equal(alignLabels('Select <1>Go</1>.', 'Wähle <1>Weiter</1>.', translations), 'Wähle <1>Los</1>.');
+});

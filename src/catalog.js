@@ -27,11 +27,16 @@ async function writeAtomically(path, value) {
 /**
  * A marker whose source text is itself a catalog message names that interface label ("select
  * <1>Go</1>"), so its translated text becomes the label's translation ("<1>Los</1>"). The result is
- * kept only if it still passes validation.
+ * kept only if it still passes validation. Words around the marker are not adjusted, so a language
+ * that inflects or elides before a name (French "l'aide" → "l'Support") can read awkwardly.
  */
 export function alignLabels(source, text, translations, policy = {}) {
   let aligned = text;
+  // A marker number used twice cannot be matched to one occurrence, so it is left alone.
+  const counts = new Map();
+  for (const [, marker] of source.matchAll(/<(\d+)>/g)) counts.set(marker, (counts.get(marker) ?? 0) + 1);
   for (const [, marker, label] of source.matchAll(/<(\d+)>([^<]+)<\/\1>/g)) {
+    if (counts.get(marker) > 1 || (text.match(new RegExp(`<${marker}>`, 'g')) ?? []).length !== 1) continue;
     const translation = translations.get(label);
     if (typeof translation !== 'string' || translation === label) continue;
     aligned = aligned.replace(new RegExp(`<${marker}>[^<]*</${marker}>`), () => `<${marker}>${translation}</${marker}>`);
