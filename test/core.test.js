@@ -258,3 +258,10 @@ test('an exact-message term is validated and respects the review gate', async ()
   const [rejected] = await loose.translate([{id: 'b', source: 'Hello {name}'}], {locale: 'de'});
   assert.deepEqual([rejected.text, rejected.status], ['Hello {name}', 'rejected']);
 });
+
+test('a combining mark belongs to its word in Indic scripts', async () => {
+  const {hasTerm} = await import('../src/core.js');
+  assert.equal(hasTerm('कागज पर छापें', 'गज'), false);
+  assert.equal(hasTerm('50 गज लंबा', 'गज'), true);
+  assert.equal(hasTerm('रेखाओं की अपारदर्शिता', 'अपारदर्शिता'), true);
+});
