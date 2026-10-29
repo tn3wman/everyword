@@ -265,3 +265,9 @@ test('a combining mark belongs to its word in Indic scripts', async () => {
   assert.equal(hasTerm('50 गज लंबा', 'गज'), true);
   assert.equal(hasTerm('रेखाओं की अपारदर्शिता', 'अपारदर्शिता'), true);
 });
+
+test('decomposed kana voicing marks keep Japanese unspaced', async () => {
+  const {hasTerm} = await import('../src/core.js');
+  assert.equal(hasTerm('サイズ変更', '変更'), true);
+  assert.equal(hasTerm('サイズ変更', '変更'), true);
+});

@@ -146,7 +146,8 @@ function sameTokens(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
  */
 // Scripts written without spaces between words: a neighbouring character there never extends a word.
 // Combining marks belong to their word: Hindi "कागज" (paper) contains no separate word "गज".
-const WORD = '[[\\p{L}\\p{M}\\p{N}_]--[\\p{sc=Han}\\p{sc=Hiragana}\\p{sc=Katakana}\\p{sc=Thai}\\p{sc=Lao}\\p{sc=Khmer}\\p{sc=Myanmar}\\p{sc=Tibetan}]]';
+// The kana voicing marks (U+3099, U+309A) are script Inherited, so they are excluded explicitly.
+const WORD = '[[\\p{L}\\p{M}\\p{N}_]--[\\p{sc=Han}\\p{sc=Hiragana}\\p{sc=Katakana}\\p{sc=Thai}\\p{sc=Lao}\\p{sc=Khmer}\\p{sc=Myanmar}\\p{sc=Tibetan}\\u3099\\u309a]]';
 function termPattern(term, flags) {
   const escaped = term.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
   return new RegExp(`(?<!${WORD})${escaped}(?!${WORD})`, flags);
