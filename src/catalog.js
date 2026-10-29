@@ -24,6 +24,21 @@ async function writeAtomically(path, value) {
   await rename(temporary, path);
 }
 
+/**
+ * A marker whose source text is itself a catalog message names that interface label ("select
+ * <1>Go</1>"), so its translated text becomes the label's translation ("<1>Los</1>"). The result is
+ * kept only if it still passes validation.
+ */
+export function alignLabels(source, text, translations, policy = {}) {
+  let aligned = text;
+  for (const [, marker, label] of source.matchAll(/<(\d+)>([^<]+)<\/\1>/g)) {
+    const translation = translations.get(label);
+    if (typeof translation !== 'string' || translation === label) continue;
+    aligned = aligned.replace(new RegExp(`<${marker}>[^<]*</${marker}>`), () => `<${marker}>${translation}</${marker}>`);
+  }
+  return aligned === text || validateTranslation(source, aligned, policy) ? text : aligned;
+}
+
 /** Glossary file: {"*": {term: translation}, "<locale>": {...}}; locale entries override "*". */
 export function glossaryFor(glossaries, locale) {
   const language = new Intl.Locale(locale).language;
@@ -92,7 +107,8 @@ export async function translateCatalog({source, locales, output, provider, sourc
     }
     const work = keys.filter(key => !translated.has(key));
     const failures = [];
-    const save = () => writeAtomically(path, Object.fromEntries(keys.flatMap(key => translated.has(key) ? [[key, translated.get(key)]] : [])));
+    const policy = {glossary, sourceLocale, avoid: avoidFor(styles, locale)};
+    const save = () => writeAtomically(path, Object.fromEntries(keys.flatMap(key => translated.has(key) ? [[key, alignLabels(key, translated.get(key), translated, policy)] ] : [])));
     for (let offset = 0; offset < work.length; offset += BATCH) {
       running.throwIfAborted();
       const batch = work.slice(offset, offset + BATCH);

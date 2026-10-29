@@ -127,3 +127,11 @@ test('a provider that ignores the avoid list cannot save an avoided word', async
   assert.match(report.locales[0].failures[0].reason, /"Sie", which the style avoids/);
   assert.deepEqual(await files.read('de'), {});
 });
+
+test('a marker naming another catalog message uses that message\'s translation', async () => {
+  const files = await project(entries('Go', 'Enter coordinates and select <1>Go</1>.', 'Open <0>Settings</0>'));
+  const replies = {Go: 'Los', 'Enter coordinates and select <1>Go</1>.': 'Gib Koordinaten ein und wähle <1>Weiter</1>.', 'Open <0>Settings</0>': 'Öffne <0>Einstellungen</0>'};
+  const provider = {async translate({segments}) { return segments.map(segment => ({id: segment.id, text: replies[segment.source]})); }};
+  await translateCatalog({source: files.source, locales: ['de'], output: files.output, provider});
+  assert.deepEqual(await files.read('de'), {Go: 'Los', 'Enter coordinates and select <1>Go</1>.': 'Gib Koordinaten ein und wähle <1>Los</1>.', 'Open <0>Settings</0>': 'Öffne <0>Einstellungen</0>'});
+});
